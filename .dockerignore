@@ -1,0 +1,11 @@
+.git
+.github
+.venv
+venv
+data
+demo
+**/__pycache__
+**/*.py[cod]
+.env
+docker-compose.yml
+README.md
