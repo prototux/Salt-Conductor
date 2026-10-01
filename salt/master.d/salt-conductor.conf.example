@@ -1,0 +1,78 @@
+# Salt master settings used by Salt Conductor.
+# Copy to /etc/salt/master.d/salt-conductor.conf and adapt; see demo/salt/master.d
+# for a complete working example.
+
+# --- salt-api ---------------------------------------------------------------
+rest_cherrypy:
+  port: 8000
+  ssl_crt: /etc/pki/tls/certs/salt-api.crt
+  ssl_key: /etc/pki/tls/private/salt-api.key
+
+netapi_enable_clients:
+  - local
+  - local_async
+  - local_batch
+  - runner
+  - runner_async
+  - wheel
+  - wheel_async
+
+# Who may do what. Salt Conductor treats ".*" + "@wheel" + "@runner" as administrator.
+external_auth:
+  ldap:
+    salt-admins%:
+      - .*
+      - '@wheel'
+      - '@runner'
+      - '@jobs'
+    salt-operators%:
+      - 'test.*'
+      - 'state.*'
+      - 'grains.*'
+      - 'pillar.*'
+      - '@jobs'
+      - '@runner':
+          - 'jobs.*'
+          - 'manage.*'
+          - 'cache.grains'
+
+# --- job cache and event history in PostgreSQL (salt-pip install psycopg2-binary)
+# Tables are created by salt_conductor/schema.sql (Salt Conductor applies it on start).
+master_job_cache: pgjsonb
+event_return: pgjsonb
+returner.pgjsonb.host: db.example.org
+returner.pgjsonb.port: 5432
+returner.pgjsonb.db: salt
+returner.pgjsonb.user: salt
+returner.pgjsonb.pass: CHANGE-ME
+
+# --- states and pillar in git ------------------------------------------------
+fileserver_backend:
+  - gitfs
+gitfs_provider: gitpython
+gitfs_base: main
+gitfs_remotes:
+  - git@git.example.org:infra/salt-states.git
+git_pillar_provider: gitpython
+git_pillar_base: main
+
+# --- database pillar managed from Salt Conductor --------------------------------
+# Install salt/extension_modules/pillar/conductor_db.py into <extension_modules>/pillar/
+extension_modules: /srv/salt-ext
+
+ext_pillar:
+  - git:
+    - main git@git.example.org:infra/salt-pillar.git
+  - conductor_db:
+      host: db.example.org
+      port: 5432
+      dbname: salt
+      user: salt
+      password: CHANGE-ME
+  # secrets from OpenBao/Vault (salt-pip install saltext-vault)
+  - vault:
+      conf: path=secret/salt/common
+      nesting_key: secrets
+  - vault:
+      conf: path=secret/salt/minions/{minion}
+      nesting_key: secrets
