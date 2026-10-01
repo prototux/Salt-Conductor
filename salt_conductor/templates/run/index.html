@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header, target_fields %}
+{% block content %}
+<div class="row">
+    <div class="col-xl-8">
+        <div class="card">
+            {{ card_header('Command', 'terminal-2', collapse=False) }}
+            <div class="card-body">
+                <form id="run-form" autocomplete="off">
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Client</label>
+                            <select class="form-select" name="client" id="client">
+                                {% for v, l in clients %}<option value="{{ v }}" {% if request.args.client == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-8 target-row">
+                            <label class="form-label d-flex">Target <a href="#" class="ms-auto fs-xs fw-normal" id="preview-btn"><i class="ti ti-eye"></i> preview matches</a></label>
+                            {{ target_fields(request.args.tgt or '*', request.args.tgt_type or 'glob', target_types) }}
+                            <div id="preview" class="mt-1 fs-xs"></div>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label d-flex">Function <a href="#" class="ms-auto fs-xs fw-normal" id="doc-btn"><i class="ti ti-book"></i> show documentation</a></label>
+                            <input class="form-control font-monospace" name="fun" id="fun" list="fun-list" value="{{ request.args.fun or 'test.ping' }}" placeholder="module.function" required>
+                            <datalist id="fun-list"></datalist>
+                        </div>
+                        <div class="col-md-12">
+                            <label class="form-label">Arguments <span class="text-muted fw-normal fs-xs">- positional args and <code>key=value</code> kwargs, space or newline separated, YAML typed (e.g. <code>nginx</code> <code>test=True</code> <code>pillar='{"a": 1}'</code>)</span></label>
+                            <textarea class="form-control font-monospace" name="args" id="args" rows="3">{{ request.args.args or '' }}</textarea>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Timeout (s)</label>
+                            <input type="number" class="form-control" name="timeout" id="timeout" min="1" placeholder="default">
+                        </div>
+                        <div class="col-md-3" id="batch-col" style="display:none">
+                            <label class="form-label">Batch size</label>
+                            <input class="form-control" name="batch" id="batch" value="25%">
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end gap-3 flex-wrap">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="test" name="test">
+                                <label class="form-check-label" for="test">Dry run (<code>test=True</code>)</label>
+                            </div>
+                        </div>
+                    </div>
+                    <hr class="border-dashed">
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary px-4" type="submit" id="run-btn" data-busy="Running..."><i class="ti ti-player-play me-1"></i> Execute</button>
+                        <button class="btn btn-light" type="button" data-bs-toggle="modal" data-bs-target="#save-modal"><i class="ti ti-device-floppy me-1"></i> Save as template</button>
+                        <span class="ms-auto text-muted fs-xs align-self-center" id="cli-preview"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div class="card" id="result-card" style="display:none">
+            <div class="card-header">
+                <h4 class="card-title">Result <span class="text-muted fs-xs fw-normal ms-2" id="result-meta"></span></h4>
+                <div class="card-actions">
+                    <div class="btn-group btn-group-sm" role="group">
+                        <button class="btn btn-light active" data-view="pretty">Pretty</button>
+                        <button class="btn btn-light" data-view="json">JSON</button>
+                    </div>
+                    <button class="btn btn-sm btn-light" id="copy-result" title="Copy"><i class="ti ti-copy"></i></button>
+                </div>
+            </div>
+            <div class="card-body" id="result"></div>
+        </div>
+    </div>
+
+    <div class="col-xl-4">
+        <div class="card">
+            {{ card_header('Saved commands', 'bookmark') }}
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush" id="saved-list">
+                    {% for c in saved %}
+                    <li class="list-group-item d-flex align-items-center gap-2 px-3">
+                        <a href="#" class="flex-grow-1 min-w-0" data-saved='{{ c|tojson|forceescape }}'>
+                            <span class="fw-semibold d-block text-truncate">{{ c.name }}</span>
+                            <span class="text-muted fs-xs font-monospace text-truncate d-block">{{ c.fun }} @ {{ c.tgt }}</span>
+                        </a>
+                        {% if c.owner == g.user.username or g.user.is_admin %}<button class="btn btn-sm btn-light" data-del-saved="{{ c.id }}" title="Delete"><i class="ti ti-trash"></i></button>{% endif %}
+                    </li>
+                    {% else %}<li class="list-group-item text-muted">No saved commands yet.</li>{% endfor %}
+                </ul>
+            </div>
+        </div>
+        <div class="card">
+            {{ card_header('Quick templates', 'bolt') }}
+            <div class="card-body d-flex flex-wrap gap-1">
+                {% for label, fun, args in [
+                    ('Ping', 'test.ping', ''), ('Test states', 'state.test', ''), ('Apply states', 'state.apply', ''), ('Apply SLS', 'state.apply', 'common'),
+                    ('Uptime', 'cmd.run', 'uptime'), ('OS grains', 'grains.item', 'os osrelease kernelrelease'),
+                    ('Disk usage', 'disk.usage', ''), ('Pkg version', 'pkg.version', 'nginx-light'), ('Refresh pillar', 'saltutil.refresh_pillar', ''),
+                    ('Sync all', 'saltutil.sync_all', ''), ('Salt version', 'test.version', ''), ('Running jobs', 'saltutil.running', ''),
+                    ('Pillar key', 'pillar.get', 'nginx')] %}
+                <button class="btn btn-sm btn-soft-secondary" data-template='{{ {"fun": fun, "args": args}|tojson|forceescape }}'>{{ label }}</button>
+                {% endfor %}
+                <button class="btn btn-sm btn-soft-info" data-template='{{ {"fun": "manage.status", "args": "", "client": "runner"}|tojson|forceescape }}'>manage.status</button>
+                <button class="btn btn-sm btn-soft-info" data-template='{{ {"fun": "fileserver.update", "args": "", "client": "runner"}|tojson|forceescape }}'>fileserver.update</button>
+                <button class="btn btn-sm btn-soft-info" data-template='{{ {"fun": "git_pillar.update", "args": "", "client": "runner"}|tojson|forceescape }}'>git_pillar.update</button>
+            </div>
+        </div>
+        <div class="card" id="doc-card" style="display:none">
+            {{ card_header('Documentation', 'book') }}
+            <div class="card-body"><pre class="output" id="doc-box" style="max-height:420px"></pre></div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="save-modal" tabindex="-1">
+    <div class="modal-dialog"><div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title">Save command template</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+            <div class="mb-3"><label class="form-label">Name</label><input class="form-control" id="save-name"></div>
+            <div class="mb-3"><label class="form-label">Description</label><input class="form-control" id="save-desc"></div>
+            <div class="form-check"><input class="form-check-input" type="checkbox" id="save-shared" checked><label class="form-check-label" for="save-shared">Shared with all users</label></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="save-btn">Save</button></div>
+    </div></div>
+</div>
+<datalist id="minion-ids">{% for m in minions %}<option value="{{ m }}">{% endfor %}</datalist>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const $ = id => document.getElementById(id);
+    const form = $('run-form');
+    let lastResult = null, lastOpts = {}, view = 'pretty';
+
+    function values() {
+        return {
+            client: $('client').value, tgt: $('tgt').value, tgt_type: $('tgt_type').value,
+            fun: $('fun').value.trim(), args: $('args').value, timeout: $('timeout').value,
+            batch: $('batch').value, test: $('test').checked,
+        };
+    }
+    function cli() {
+        const v = values();
+        const isRunner = v.client.startsWith('runner'), isWheel = v.client === 'wheel';
+        const flag = { glob: '', list: '-L ', grain: '-G ', grain_pcre: '-P ', pillar: '-I ', pcre: '-E ', compound: '-C ', nodegroup: '-N ', ipcidr: '-S ' }[v.tgt_type] || '';
+        const args = v.args.replace(/\n/g, ' ').trim() + (v.test ? ' test=True' : '');
+        $('cli-preview').innerHTML = '<code>' + SW.esc(isRunner ? `salt-run ${v.fun} ${args}` : isWheel ? `wheel ${v.fun} ${args}` :
+            `salt ${v.client === 'local_batch' ? `-b ${v.batch} ` : ''}${v.client === 'local_async' ? '--async ' : ''}${flag}'${v.tgt}' ${v.fun} ${args}`) + '</code>';
+    }
+    function clientChanged() {
+        const c = $('client').value;
+        document.querySelector('.target-row').style.display = (c.startsWith('runner') || c === 'wheel') ? 'none' : '';
+        $('batch-col').style.display = c === 'local_batch' ? '' : 'none';
+        SW.api('/api/functions?client=' + c, { quiet: true }).then(list => {
+            $('fun-list').innerHTML = list.map(f => `<option value="${SW.esc(f)}">`).join('');
+        }).catch(() => {});
+        cli();
+    }
+    $('client').addEventListener('change', clientChanged);
+    form.addEventListener('input', cli);
+    clientChanged();
+
+    function renderResult() {
+        const box = $('result');
+        if (view === 'json') {
+            box.innerHTML = '';
+            const pre = document.createElement('pre');
+            pre.className = 'output';
+            pre.textContent = JSON.stringify(lastResult, null, 2);
+            box.appendChild(pre);
+        } else {
+            SW.renderResults(box, lastResult, lastOpts);
+        }
+    }
+    document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
+        document.querySelectorAll('[data-view]').forEach(x => x.classList.toggle('active', x === b));
+        view = b.dataset.view;
+        renderResult();
+    }));
+    $('copy-result').addEventListener('click', () => { navigator.clipboard?.writeText(JSON.stringify(lastResult, null, 2)); SW.toast('Copied', 'primary', 1500); });
+
+    form.addEventListener('submit', async e => {
+        e.preventDefault();
+        const v = values();
+        const btn = $('run-btn');
+        SW.busy(btn, true);
+        const t0 = performance.now();
+        try {
+            const res = await SW.api('/api/run', { body: v });
+            $('result-card').style.display = '';
+            const secs = ((performance.now() - t0) / 1000).toFixed(2);
+            if (res.jid) {
+                $('result-meta').textContent = 'async job';
+                $('result').innerHTML = `<div class="alert alert-info mb-0"><i class="ti ti-clock-play me-1"></i> Job <a class="alert-link font-monospace" href="/jobs/${res.jid}">${res.jid}</a> published
+                    ${res.minions ? `to ${res.minions.length} minion(s): <span class="font-monospace">${SW.esc(res.minions.join(', '))}</span>` : ''}. Results will appear on the job page.</div>`;
+                lastResult = res;
+            } else {
+                lastResult = res.result;
+                lastOpts = { fullReturn: !!res.full_return, single: !!res.single, stateFun: v.fun.startsWith('state.') };
+                const n = res.single ? '' : Object.keys(res.result || {}).length + ' minion(s) · ';
+                $('result-meta').textContent = `${n}${secs}s · ${v.fun}`;
+                renderResult();
+            }
+            $('result-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } finally { SW.busy(btn, false); }
+    });
+
+    $('preview-btn').addEventListener('click', async e => {
+        e.preventDefault();
+        $('preview').innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+        try {
+            const list = await SW.api('/api/preview-target', { body: { tgt: $('tgt').value, tgt_type: $('tgt_type').value } });
+            $('preview').innerHTML = list.length ? `<span class="text-primary fw-semibold">${list.length} match:</span> ` + list.map(m => `<span class="badge badge-soft-primary">${SW.esc(m)}</span>`).join(' ')
+                : '<span class="text-danger">No responding minion matches this target.</span>';
+        } catch (err) { $('preview').innerHTML = ''; }
+    });
+
+    $('doc-btn').addEventListener('click', async e => {
+        e.preventDefault();
+        $('doc-card').style.display = '';
+        $('doc-box').textContent = 'Loading…';
+        const d = await SW.api(`/api/doc?client=${$('client').value}&fun=${encodeURIComponent($('fun').value)}`);
+        $('doc-box').textContent = Object.entries(d).map(([k, v]) => `${k}\n${'='.repeat(k.length)}\n${v || '(no docstring)'}`).join('\n\n') || 'No documentation found.';
+    });
+
+    function fill(o) {
+        if (o.client) { $('client').value = o.client; clientChanged(); }
+        if (o.tgt !== undefined) $('tgt').value = o.tgt;
+        if (o.tgt_type) $('tgt_type').value = o.tgt_type;
+        $('fun').value = o.fun;
+        $('args').value = o.args ?? '';
+        cli();
+    }
+    document.querySelectorAll('[data-template]').forEach(b => b.addEventListener('click', () => fill(JSON.parse(b.dataset.template))));
+    document.querySelectorAll('[data-saved]').forEach(a => a.addEventListener('click', e => {
+        e.preventDefault();
+        const c = JSON.parse(a.dataset.saved);
+        fill({ client: c.client, tgt: c.tgt, tgt_type: c.tgt_type, fun: c.fun, args: c.kwarg?.__raw__ ?? (c.arg || []).join(' ') });
+    }));
+    document.querySelectorAll('[data-del-saved]').forEach(b => b.addEventListener('click', async () => {
+        if (!(await SW.confirm('Delete saved command?', '', 'Delete'))) return;
+        await SW.api('/api/saved/' + b.dataset.delSaved, { method: 'DELETE' });
+        b.closest('li').remove();
+    }));
+    $('save-btn').addEventListener('click', async () => {
+        const v = values();
+        await SW.api('/api/saved', { body: Object.assign(v, { name: $('save-name').value, description: $('save-desc').value, shared: $('save-shared').checked }) });
+        SW.toast('Saved');
+        location.reload();
+    });
+})();
+</script>
+{% endblock %}

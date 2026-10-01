@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% from "macros.html" import target_fields %}
+{% block content %}
+<div class="card">
+    <div class="card-header flex-wrap gap-2">
+        <h4 class="card-title"><i class="ti ti-terminal-2 me-1 text-muted"></i>Remote shell <span class="text-muted fs-xs fw-normal">- runs <code>cmd.run_all</code>, every command is audited</span></h4>
+        <div class="card-actions flex-wrap gap-2">
+            <div style="min-width:320px">{{ target_fields(request.args.tgt or '*', request.args.tgt_type or ('list' if request.args.tgt else 'glob'), target_types, 'sm') }}</div>
+            <input class="form-control form-control-sm font-monospace" id="cwd" value="/root" style="width:130px" title="Working directory">
+            <input class="form-control form-control-sm" id="runas" placeholder="run as (root)" style="width:120px">
+            <button class="btn btn-sm btn-light" id="clear" title="Clear"><i class="ti ti-eraser"></i></button>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="terminal" id="term"><div class="text-muted">Salt remote shell. Type a command and press Enter. Use ↑/↓ for history. Commands run with <span class="prompt">python_shell=True</span>.</div></div>
+        <div class="input-group">
+            <span class="input-group-text terminal-input prompt border-0" id="prompt">#</span>
+            <input class="form-control terminal-input" id="cmd" autocomplete="off" spellcheck="false" autofocus placeholder="uptime">
+        </div>
+    </div>
+</div>
+<datalist id="minion-ids">{% for m in minions %}<option value="{{ m }}">{% endfor %}</datalist>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const term = document.getElementById('term'), input = document.getElementById('cmd');
+    let history = JSON.parse(localStorage.getItem('conductor.shell') || '[]'), hpos = history.length, busy = false;
+    function print(htmlStr) { const d = document.createElement('div'); d.innerHTML = htmlStr; term.appendChild(d); term.scrollTop = term.scrollHeight; }
+    input.addEventListener('keydown', async e => {
+        if (e.key === 'ArrowUp') { if (hpos > 0) input.value = history[--hpos]; e.preventDefault(); return; }
+        if (e.key === 'ArrowDown') { input.value = hpos < history.length - 1 ? history[++hpos] : ''; hpos = Math.min(hpos + 1, history.length); e.preventDefault(); return; }
+        if (e.key !== 'Enter' || busy) return;
+        const cmd = input.value.trim();
+        if (!cmd) return;
+        if (cmd === 'clear') { term.innerHTML = ''; input.value = ''; return; }
+        history.push(cmd); history = history.slice(-100); hpos = history.length;
+        localStorage.setItem('conductor.shell', JSON.stringify(history));
+        const tgt = document.getElementById('tgt').value;
+        print(`<span class="prompt">[${SW.esc(tgt)}]</span> <span class="cmd"># ${SW.esc(cmd)}</span>`);
+        input.value = ''; busy = true; input.disabled = true;
+        try {
+            const res = await SW.api('/api/shell', { quiet: true, body: { cmd, tgt, tgt_type: document.getElementById('tgt_type').value,
+                cwd: document.getElementById('cwd').value, runas: document.getElementById('runas').value } });
+            const minions = Object.keys(res).sort();
+            if (!minions.length) print('<span class="err">No minion returned.</span>');
+            for (const m of minions) {
+                const r = res[m];
+                if (typeof r !== 'object') { print(`<span class="host">${SW.esc(m)}:</span> <span class="err">${SW.esc(r)}</span>`); continue; }
+                const multi = minions.length > 1;
+                print(`${multi ? `<span class="host">${SW.esc(m)}</span> ` : ''}${r.retcode ? `<span class="err">(exit ${r.retcode})</span>` : ''}`
+                    + `<pre class="m-0 text-reset" style="white-space:pre-wrap">${SW.esc(r.stdout || '')}${r.stderr ? `<span class="err">${SW.esc(r.stderr)}</span>` : ''}</pre>`);
+            }
+        } catch (err) {
+            print(`<span class="err">${SW.esc(err.message)}</span>`);
+        } finally { busy = false; input.disabled = false; input.focus(); }
+    });
+    document.getElementById('clear').addEventListener('click', () => { term.innerHTML = ''; input.focus(); });
+    term.addEventListener('click', () => input.focus());
+})();
+</script>
+{% endblock %}

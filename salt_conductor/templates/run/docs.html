@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-xl-3 col-lg-4">
+        <div class="card">
+            <div class="card-header p-0 border-0">
+                <ul class="nav nav-tabs nav-bordered w-100 px-2" id="kind-tabs">
+                    <li class="nav-item"><a class="nav-link active" href="#" data-kind="exec">Execution</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#" data-kind="state">States</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#" data-kind="runner">Runners</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#" data-kind="wheel">Wheel</a></li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <input class="form-control mb-2" id="mod-filter" placeholder="Filter functions…">
+                <div class="list-group list-group-flush" id="mod-list" style="max-height:640px;overflow:auto"></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-9 col-lg-8">
+        <div class="card" id="doc-card">
+            <div class="card-header"><h4 class="card-title font-monospace" id="doc-title">Select a module</h4>
+                <div class="card-actions"><a class="btn btn-sm btn-soft-primary d-none" id="try-btn" href="#"><i class="ti ti-player-play me-1"></i>Try it</a></div></div>
+            <div class="card-body" id="doc-body"><div class="empty-state"><i class="ti ti-book"></i>Documentation is fetched live from a minion (execution/state modules) or the master (runners/wheel).</div></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    let kind = 'exec', funcs = [];
+    const list = document.getElementById('mod-list');
+    function renderList() {
+        const q = document.getElementById('mod-filter').value.toLowerCase();
+        const mods = {};
+        funcs.filter(f => f.toLowerCase().includes(q)).forEach(f => { const m = f.split('.')[0]; (mods[m] = mods[m] || []).push(f); });
+        list.innerHTML = Object.entries(mods).map(([m, fs]) => `<a href="#" class="list-group-item list-group-item-action d-flex justify-content-between" data-name="${SW.esc(m)}">
+            <span class="font-monospace fw-semibold">${SW.esc(m)}</span><span class="badge badge-soft-secondary">${fs.length}</span></a>
+            ${q ? fs.map(f => `<a href="#" class="list-group-item list-group-item-action ps-4 font-monospace fs-xs" data-name="${SW.esc(f)}">${SW.esc(f)}</a>`).join('') : ''}`).join('')
+            || '<div class="text-muted p-2">Nothing found</div>';
+    }
+    function loadList() {
+        list.innerHTML = '<div class="text-center p-3"><span class="spinner-border text-primary"></span></div>';
+        SW.api('/api/docs/modules?kind=' + kind).then(f => { funcs = f; renderList(); });
+    }
+    async function show(name) {
+        const card = document.getElementById('doc-card');
+        SW.loading(card, true);
+        try {
+            const d = await SW.api(`/api/docs/doc?kind=${kind}&name=${encodeURIComponent(name)}`);
+            document.getElementById('doc-title').textContent = name;
+            const body = document.getElementById('doc-body');
+            const entries = Object.entries(d).sort();
+            body.innerHTML = entries.map(([k, v]) => `<div class="mb-4"><h5 class="font-monospace text-primary" id="f-${SW.esc(k)}">${SW.esc(k)}</h5><pre class="output">${SW.esc(v || '(no docstring)')}</pre></div>`).join('')
+                || '<div class="text-muted">No documentation.</div>';
+            const tryBtn = document.getElementById('try-btn');
+            const client = kind === 'runner' ? 'runner' : kind === 'wheel' ? 'wheel' : 'local';
+            tryBtn.classList.toggle('d-none', kind === 'state' || !name.includes('.'));
+            tryBtn.href = `/run?client=${client}&fun=${encodeURIComponent(name)}`;
+        } finally { SW.loading(card, false); }
+    }
+    document.querySelectorAll('#kind-tabs .nav-link').forEach(a => a.addEventListener('click', e => {
+        e.preventDefault(); kind = a.dataset.kind;
+        document.querySelectorAll('#kind-tabs .nav-link').forEach(x => x.classList.toggle('active', x === a));
+        loadList();
+    }));
+    list.addEventListener('click', e => { const a = e.target.closest('[data-name]'); if (a) { e.preventDefault(); show(a.dataset.name); } });
+    document.getElementById('mod-filter').addEventListener('input', SW.debounce(renderList, 150));
+    loadList();
+})();
+</script>
+{% endblock %}
