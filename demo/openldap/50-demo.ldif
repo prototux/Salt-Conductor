@@ -1,0 +1,54 @@
+# Demo directory for the Salt LDAP eauth (loaded by osixia/openldap at first start).
+# Only members of cn=salt-users may log in; salt-admins / salt-operators get the ACLs
+# defined in docker/salt/master.d/10-api.conf. carol exists but is not a Salt user.
+
+dn: ou=people,dc=example,dc=org
+objectClass: organizationalUnit
+ou: people
+
+dn: ou=groups,dc=example,dc=org
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=alice,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Admin
+sn: Admin
+mail: alice@example.org
+userPassword: alice
+
+dn: uid=bob,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob Operator
+sn: Operator
+mail: bob@example.org
+userPassword: bob
+
+dn: uid=carol,ou=people,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: carol
+cn: Carol Outsider
+sn: Outsider
+mail: carol@example.org
+userPassword: carol
+
+dn: cn=salt-users,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: salt-users
+description: Allowed to log in to Salt (salt-api / Salt Conductor)
+uniqueMember: uid=alice,ou=people,dc=example,dc=org
+uniqueMember: uid=bob,ou=people,dc=example,dc=org
+
+dn: cn=salt-admins,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: salt-admins
+description: Full Salt permissions
+uniqueMember: uid=alice,ou=people,dc=example,dc=org
+
+dn: cn=salt-operators,ou=groups,dc=example,dc=org
+objectClass: groupOfUniqueNames
+cn: salt-operators
+description: Run states and read-only commands
+uniqueMember: uid=bob,ou=people,dc=example,dc=org
