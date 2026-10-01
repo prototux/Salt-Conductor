@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card"><div class="card-body">
+    <form method="get" class="d-flex gap-2"><input class="form-control form-control-lg" name="q" value="{{ q }}" placeholder="Search minions, jobs, files, pillar keys…" autofocus>
+        <button class="btn btn-primary px-4"><i class="ti ti-search"></i></button></form>
+    {% if q %}<p class="text-muted mt-2 mb-0">{{ total }} result(s) for <b>{{ q }}</b></p>{% endif %}
+</div></div>
+{% if q %}
+<div class="row">
+    <div class="col-xl-6">
+        <div class="card"><div class="card-header"><h4 class="card-title"><i class="ti ti-server-2 me-1 text-muted"></i>Minions <span class="badge badge-soft-secondary">{{ res.minions|length }}</span></h4></div>
+            <ul class="list-group list-group-flush">{% for m in res.minions %}<li class="list-group-item"><a class="fw-semibold" href="{{ url_for('minions.detail', mid=m.id) }}">{{ m.id }}</a> <span class="text-muted fs-xs">{{ m.os }} · {{ m.ip }}</span></li>{% else %}<li class="list-group-item text-muted">No match</li>{% endfor %}</ul></div>
+        <div class="card"><div class="card-header"><h4 class="card-title"><i class="ti ti-database me-1 text-muted"></i>Database pillar <span class="badge badge-soft-secondary">{{ res.pillar|length }}</span></h4></div>
+            <ul class="list-group list-group-flush">{% for p in res.pillar %}<li class="list-group-item"><a class="font-monospace" href="{{ url_for('pillar_db.index') }}">{{ p.key }}</a> <span class="text-muted fs-xs">{{ p.tgt_type }}: {{ p.target }}</span></li>{% else %}<li class="list-group-item text-muted">No match</li>{% endfor %}</ul></div>
+    </div>
+    <div class="col-xl-6">
+        <div class="card"><div class="card-header"><h4 class="card-title"><i class="ti ti-file-code me-1 text-muted"></i>Files <span class="badge badge-soft-secondary">{{ res.files|length }}</span></h4></div>
+            <ul class="list-group list-group-flush">{% for f in res.files %}<li class="list-group-item">
+                <span class="badge badge-soft-{{ 'primary' if f.repo == 'states' else 'info' }}">{{ f.repo }}</span>
+                <a class="font-monospace" href="{{ url_for(f.repo ~ '.edit', path=f.path) }}{% if f.line %}#L{{ f.line }}{% endif %}">{{ f.path }}{% if f.line %}:{{ f.line }}{% endif %}</a>
+                {% if f.text %}<div class="font-monospace fs-xs text-muted text-truncate">{{ f.text }}</div>{% endif %}</li>{% else %}<li class="list-group-item text-muted">No match</li>{% endfor %}</ul></div>
+        <div class="card"><div class="card-header"><h4 class="card-title"><i class="ti ti-list-details me-1 text-muted"></i>Jobs <span class="badge badge-soft-secondary">{{ res.jobs|length }}</span></h4></div>
+            <ul class="list-group list-group-flush">{% for j in res.jobs %}<li class="list-group-item"><a class="font-monospace" href="{{ url_for('jobs.detail', jid=j.jid) }}">{{ j.jid }}</a> <code>{{ j.fun }}</code> <span class="text-muted fs-xs">{{ j.tgt }} · {{ j.user }}</span></li>{% else %}<li class="list-group-item text-muted">No match</li>{% endfor %}</ul></div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
