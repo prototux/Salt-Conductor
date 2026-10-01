@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+    <div class="card-header p-0 border-0">
+        <ul class="nav nav-tabs nav-bordered w-100 px-2">
+            <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#live"><i class="ti ti-broadcast me-1"></i>Live stream</a></li>
+            <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#hist" id="hist-tab"><i class="ti ti-history me-1"></i>History (database)</a></li>
+        </ul>
+    </div>
+    <div class="card-body tab-content">
+        <div class="tab-pane fade show active" id="live">
+            <div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+                <span class="badge badge-soft-dark" id="conn"><i class="ti ti-plug-x"></i> disconnected</span>
+                <input class="form-control form-control-sm font-monospace" style="max-width:280px" id="tag-filter" placeholder="tag filter, e.g. salt/job/*/ret/*">
+                <div class="btn-group btn-group-sm" id="presets">
+                    <button class="btn btn-light" data-f="">All</button>
+                    <button class="btn btn-light" data-f="salt/job/*">Jobs</button>
+                    <button class="btn btn-light" data-f="salt/auth*">Auth</button>
+                    <button class="btn btn-light" data-f="salt/minion/*/start">Minion start</button>
+                    <button class="btn btn-light" data-f="salt/presence/*">Presence</button>
+                    <button class="btn btn-light" data-f="salt/beacon/*">Beacons</button>
+                </div>
+                <div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="hide-noise" checked><label class="form-check-label fs-xs" for="hide-noise">Hide find_job noise</label></div>
+                <span class="ms-auto text-muted fs-xs"><span id="ev-count">0</span> events · <span id="ev-rate">0</span>/min</span>
+                <button class="btn btn-sm btn-light" id="pause"><i class="ti ti-player-pause"></i></button>
+                <button class="btn btn-sm btn-light" id="clear"><i class="ti ti-eraser"></i></button>
+            </div>
+            <div class="events-box" id="events"><div class="empty-state"><i class="ti ti-activity"></i>Waiting for events… run something!</div></div>
+        </div>
+        <div class="tab-pane fade" id="hist">
+            <form class="d-flex gap-2 mb-3" id="hist-form">
+                <input class="form-control form-control-sm font-monospace" style="max-width:280px" name="tag" placeholder="tag prefix / glob">
+                <input class="form-control form-control-sm" style="max-width:280px" name="q" placeholder="search in event data">
+                <button class="btn btn-sm btn-primary"><i class="ti ti-search"></i></button>
+                <span class="ms-auto text-muted fs-xs align-self-center" id="hist-total"></span>
+            </form>
+            <div id="hist-box" class="events-box"></div>
+            <div class="d-flex justify-content-between mt-2"><button class="btn btn-sm btn-light" id="prev">Newer</button><button class="btn btn-sm btn-light" id="next">Older</button></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const box = document.getElementById('events');
+    let paused = false, count = 0, times = [];
+    const glob = p => new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + (p.endsWith('*') ? '' : '.*') );
+    function tagClass(tag) {
+        if (/\/ret\//.test(tag)) return 'primary';
+        if (/\/new$/.test(tag)) return 'secondary';
+        if (/auth/.test(tag)) return 'warning';
+        if (/presence|start/.test(tag)) return 'info';
+        if (/error|fail/.test(tag)) return 'danger';
+        return 'dark';
+    }
+    function eventRow(ev, when) {
+        const d = document.createElement('div');
+        d.className = 'event-row';
+        const data = ev.data || {};
+        const summary = data.fun ? `${data.fun}${data.id ? ' ← ' + data.id : ''}${data.tgt ? ' → ' + (Array.isArray(data.tgt) ? data.tgt.join(',') : data.tgt) : ''}${data.success === false ? ' ✗' : ''}` : (data.id || '');
+        d.innerHTML = `<div class="d-flex gap-2 align-items-center cursor-pointer">
+            <span class="text-muted fs-xxs font-monospace" style="width:70px">${SW.esc(when)}</span>
+            <span class="badge badge-soft-${tagClass(ev.tag)} ev-tag text-truncate" style="max-width:55%">${SW.esc(ev.tag)}</span>
+            <span class="text-truncate text-muted">${SW.esc(summary)}</span>
+            ${data.jid ? `<a class="ms-auto font-monospace fs-xxs" href="/jobs/${data.jid}" onclick="event.stopPropagation()">${data.jid}</a>` : ''}</div>
+            <pre class="output">${SW.esc(JSON.stringify(data, null, 2))}</pre>`;
+        d.firstElementChild.addEventListener('click', () => d.classList.toggle('open'));
+        return d;
+    }
+    function accept(ev) {
+        const f = document.getElementById('tag-filter').value.trim();
+        if (f && !glob(f).test(ev.tag)) return false;
+        if (document.getElementById('hide-noise').checked && (ev.data?.fun === 'saltutil.find_job' || /^\d+$/.test(ev.tag) || ev.data?.fun === 'runner.vault.get_config')) return false;
+        return true;
+    }
+    function connect() {
+        const es = new EventSource('/api/events/stream');
+        const conn = document.getElementById('conn');
+        es.onopen = () => { conn.className = 'badge badge-soft-primary'; conn.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1" style="width:.5rem;height:.5rem"></span> connected'; };
+        es.onerror = () => { conn.className = 'badge badge-soft-danger'; conn.innerHTML = '<i class="ti ti-plug-x"></i> reconnecting…'; };
+        es.addEventListener('error', e => { if (e.data) SW.toast(JSON.parse(e.data).error, 'danger'); });
+        es.onmessage = msg => {
+            const ev = JSON.parse(msg.data);
+            count++; times.push(Date.now());
+            document.getElementById('ev-count').textContent = count;
+            if (paused || !accept(ev)) return;
+            if (box.querySelector('.empty-state')) box.innerHTML = '';
+            box.prepend(eventRow(ev, new Date().toLocaleTimeString()));
+            while (box.children.length > 500) box.lastChild.remove();
+        };
+    }
+    setInterval(() => { const now = Date.now(); times = times.filter(t => now - t < 60000); document.getElementById('ev-rate').textContent = times.length; }, 2000);
+    document.getElementById('pause').addEventListener('click', e => {
+        paused = !paused;
+        e.currentTarget.innerHTML = `<i class="ti ti-player-${paused ? 'play' : 'pause'}"></i>`;
+    });
+    document.getElementById('clear').addEventListener('click', () => { box.innerHTML = ''; });
+    document.querySelectorAll('#presets [data-f]').forEach(b => b.addEventListener('click', () => { document.getElementById('tag-filter').value = b.dataset.f; }));
+    connect();
+
+    // history
+    let page = 1;
+    async function loadHist() {
+        const fd = new FormData(document.getElementById('hist-form'));
+        const params = new URLSearchParams({ tag: fd.get('tag'), q: fd.get('q'), page });
+        const hb = document.getElementById('hist-box');
+        hb.innerHTML = '<div class="empty-state"><span class="spinner-border text-primary"></span></div>';
+        const d = await SW.api('/api/events/history?' + params);
+        document.getElementById('hist-total').textContent = `${d.total} events · page ${d.page}`;
+        hb.innerHTML = '';
+        d.rows.forEach(r => hb.appendChild(eventRow({ tag: r.tag, data: r.data }, new Date(r.alter_time).toLocaleString())));
+        if (!d.rows.length) hb.innerHTML = '<div class="empty-state"><i class="ti ti-database-off"></i>No stored events (enable event_return: pgjsonb on the master)</div>';
+    }
+    document.getElementById('hist-tab').addEventListener('shown.bs.tab', () => loadHist());
+    document.getElementById('hist-form').addEventListener('submit', e => { e.preventDefault(); page = 1; loadHist(); });
+    document.getElementById('next').addEventListener('click', () => { page++; loadHist(); });
+    document.getElementById('prev').addEventListener('click', () => { page = Math.max(1, page - 1); loadHist(); });
+})();
+</script>
+{% endblock %}
