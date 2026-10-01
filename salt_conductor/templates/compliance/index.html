@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header %}
+{% block content %}
+{% set total = rows|length %}
+<div class="row row-cols-xl-4 row-cols-sm-2 row-cols-1">
+    {% for key, label, cls, icon in [('compliant', 'Compliant', 'primary', 'circle-check'), ('drift', 'Drift detected', 'warning', 'clock'), ('failed', 'Failing', 'danger', 'circle-x'), ('never', 'Never applied', 'dark', 'help-circle')] %}
+    <div class="col"><div class="card stat-card"><div class="card-body">
+        <h5>{{ label }}</h5>
+        <div class="d-flex align-items-center gap-2 my-3">
+            <div class="avatar-md"><span class="avatar-title rounded-circle bg-{{ cls }}-subtle text-{{ 'body' if cls == 'dark' else cls }}"><i class="ti ti-{{ icon }}"></i></span></div>
+            <h3 class="mb-0">{{ counts[key] }}</h3>
+            <span class="ms-auto text-muted">{{ ((counts[key] * 100 / total) if total else 0)|round|int }}%</span>
+        </div>
+        <div class="progress" style="height:5px"><div class="progress-bar bg-{{ cls }}" style="width:{{ (counts[key] * 100 / total) if total else 0 }}%"></div></div>
+    </div></div></div>
+    {% endfor %}
+</div>
+<div class="card">
+    <div class="card-header flex-wrap">
+        <h4 class="card-title">State compliance per minion</h4>
+        <div class="card-actions gap-1">
+            <input class="form-control form-control-sm" style="width:180px" placeholder="Filter…" data-filter-table="#comp-table">
+            <button class="btn btn-sm btn-soft-warning" id="drift-all"><i class="ti ti-eye-check me-1"></i>Drift check all (state.test)</button>
+            <button class="btn btn-sm btn-primary" id="remediate" disabled><i class="ti ti-tool me-1"></i>Remediate selected</button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" id="comp-table">
+            <thead><tr><th style="width:30px"><input type="checkbox" class="form-check-input" data-check-all=".cmp"></th><th>Minion</th><th>Status</th><th>States</th><th>Last run</th><th>Mode</th><th>Duration</th><th></th></tr></thead>
+            <tbody>
+            {% for r in rows|sort(attribute='state') %}
+            <tr>
+                <td><input type="checkbox" class="form-check-input cmp" value="{{ r.id }}" {% if r.state in ('drift', 'failed') %}checked{% endif %}></td>
+                <td><span class="status-dot {{ 'up' if r.up else 'down' }} me-2"></span><a class="fw-semibold" href="{{ url_for('minions.detail', mid=r.id) }}">{{ r.id }}</a></td>
+                <td>{% if r.state == 'compliant' %}<span class="badge badge-soft-primary"><i class="ti ti-circle-check"></i> compliant</span>
+                    {% elif r.state == 'drift' %}<span class="badge badge-soft-warning"><i class="ti ti-clock"></i> {{ r.run.pending }} state(s) would change</span>
+                    {% elif r.state == 'failed' %}<span class="badge badge-soft-danger"><i class="ti ti-circle-x"></i> {{ r.run.failed }} failed</span>
+                    {% else %}<span class="badge badge-soft-dark"><i class="ti ti-help-circle"></i> never applied</span>{% endif %}</td>
+                <td>{% if r.run %}
+                    <div class="progress" style="height:6px;width:140px" title="{{ r.run.ok }} ok / {{ r.run.changed }} changed / {{ r.run.pending }} pending / {{ r.run.failed }} failed">
+                        <div class="progress-bar" style="width:{{ r.run.ok * 100 / (r.run.total or 1) }}%"></div>
+                        <div class="progress-bar bg-secondary" style="width:{{ r.run.changed * 100 / (r.run.total or 1) }}%"></div>
+                        <div class="progress-bar bg-warning" style="width:{{ r.run.pending * 100 / (r.run.total or 1) }}%"></div>
+                        <div class="progress-bar bg-danger" style="width:{{ r.run.failed * 100 / (r.run.total or 1) }}%"></div>
+                    </div><span class="fs-xxs text-muted">{{ r.run.total }} states</span>{% endif %}</td>
+                <td>{% if r.run %}<a class="font-monospace fs-xs" href="{{ url_for('jobs.detail', jid=r.run.jid) }}">{{ r.run.jid }}</a><div class="text-muted fs-xxs">{{ r.run.time|timeago }}</div>{% else %}-{% endif %}</td>
+                <td>{% if r.run %}{{ '<span class="badge badge-soft-warning">test</span>'|safe if r.run.test else '<span class="badge badge-soft-secondary">apply</span>'|safe }}{% endif %}</td>
+                <td>{{ r.run.duration ~ 's' if r.run else '' }}</td>
+                <td class="table-actions">
+                    <button class="btn btn-sm btn-light" data-one="{{ r.id }}" data-test="1" title="Drift check (state.test)"><i class="ti ti-eye-check"></i></button>
+                    <button class="btn btn-sm btn-soft-primary" data-one="{{ r.id }}" data-test="0" title="Apply states (state.apply)"><i class="ti ti-player-play"></i></button>
+                </td>
+            </tr>
+            {% else %}<tr><td colspan="8"><div class="empty-state"><i class="ti ti-server-off"></i>No minions</div></td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-footer fs-xs text-muted"><i class="ti ti-info-circle"></i> Based on the most recent top-file run (<code>state.apply</code> without SLS, <code>state.test</code>, or the legacy <code>state.highstate</code>) stored in the job cache. A drift check runs <code>state.test</code>: nothing is changed.</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const sel = () => [...document.querySelectorAll('.cmp:checked')].map(c => c.value);
+    const rem = document.getElementById('remediate');
+    const upd = () => { rem.disabled = !sel().length; };
+    document.addEventListener('change', upd); upd();
+    async function run(minions, test) {
+        if (!test && !(await SW.confirm('Apply states?', `On ${minions.length ? minions.join(', ') : 'all minions'}.`, 'Apply', 'btn-primary'))) return;
+        const r = await SW.api('/api/compliance/run', { body: { minions, test } });
+        SW.toast(`Job ${r.jid} started on ${r.minions.length} minion(s)`);
+        setTimeout(() => location = '/jobs/' + r.jid, 800);
+    }
+    document.getElementById('drift-all').addEventListener('click', () => run([], true));
+    rem.addEventListener('click', () => run(sel(), false));
+    document.querySelectorAll('[data-one]').forEach(b => b.addEventListener('click', () => run([b.dataset.one], b.dataset.test === '1')));
+})();
+</script>
+{% endblock %}

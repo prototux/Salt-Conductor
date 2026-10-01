@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+{% if error %}<div class="alert alert-warning">{{ error }}</div>{% endif %}
+<div class="row">
+    <div class="col-xl-5">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-route me-1 text-muted"></i>Run an orchestration</h4></div>
+            <div class="card-body">
+                <p class="text-muted fs-xs">Orchestrations are SLS files under <code>orch/</code> in the states repository, executed on the master with <code>salt-run state.orchestrate</code>.</p>
+                <label class="form-label">Orchestration</label>
+                <div class="list-group mb-3" id="orchs">
+                    {% for o in orchs %}
+                    <label class="list-group-item d-flex gap-2 align-items-center">
+                        <input class="form-check-input" type="radio" name="orch" value="{{ o }}" {% if loop.first %}checked{% endif %}>
+                        <span class="font-monospace flex-grow-1">{{ o }}</span>
+                        <a href="{{ url_for('states.browse', sls=o) }}" class="btn btn-sm btn-light" title="View source"><i class="ti ti-code"></i></a>
+                    </label>
+                    {% else %}<div class="text-muted">No orchestration found. Create <code>orch/&lt;name&gt;.sls</code> in the <a href="{{ url_for('states.browse') }}">states repository</a>.</div>{% endfor %}
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-6"><label class="form-label">Saltenv (branch)</label>
+                        <select class="form-select" id="saltenv">{% for b in branches %}<option value="{{ b }}" {% if b == default_branch %}selected{% endif %}>{{ b }}</option>{% endfor %}</select></div>
+                    <div class="col-md-6 d-flex align-items-end"><div class="form-check form-switch mb-2"><input class="form-check-input" type="checkbox" id="test" checked><label class="form-check-label" for="test">Dry run (test=True)</label></div></div>
+                </div>
+                <label class="form-label">Extra pillar <span class="text-muted fw-normal fs-xs">(YAML, optional)</span></label>
+                <textarea class="form-control font-monospace mb-3" id="pillar" rows="3" placeholder="version: 1.2.3"></textarea>
+                <button class="btn btn-primary w-100" id="run" {% if not orchs %}disabled{% endif %}><i class="ti ti-player-play me-1"></i>Launch</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-7">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title">Recent orchestrations</h4></div>
+            <div class="table-responsive"><table class="table table-hover align-middle mb-0">
+                <thead><tr><th>Job</th><th>Started</th><th>User</th><th>Parameters</th><th>Result</th></tr></thead>
+                <tbody>
+                {% for r in recent %}
+                <tr><td><a class="font-monospace" href="{{ url_for('jobs.detail', jid=r.jid) }}">{{ r.jid }}</a></td><td>{{ r.jid|jid_time }}</td><td>{{ r.user }}</td>
+                    <td class="font-monospace fs-xs text-truncate" style="max-width:260px">{{ (r.kwarg or r.arg)|tojson }}</td>
+                    <td>{% if r.success is none %}<span class="badge badge-soft-warning">running</span>{% elif r.success %}<span class="badge badge-soft-primary">success</span>{% else %}<span class="badge badge-soft-danger">failed</span>{% endif %}</td></tr>
+                {% else %}<tr><td colspan="5"><div class="empty-state"><i class="ti ti-route"></i>No orchestration has run yet</div></td></tr>{% endfor %}
+                </tbody>
+            </table></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('run').addEventListener('click', async e => {
+    const mods = document.querySelector('[name=orch]:checked')?.value;
+    const test = document.getElementById('test').checked;
+    if (!test && !(await SW.confirm('Run orchestration ' + mods + '?', 'This will apply changes to the infrastructure.', 'Run', 'btn-primary'))) return;
+    SW.busy(e.currentTarget, true);
+    try {
+        const r = await SW.api('/api/orchestrate', { body: { mods, test, saltenv: document.getElementById('saltenv').value, pillar: document.getElementById('pillar').value } });
+        SW.toast('Orchestration started: ' + r.jid);
+        setTimeout(() => location = '/jobs/' + r.jid, 800);
+    } finally { SW.busy(e.currentTarget, false); }
+});
+</script>
+{% endblock %}
