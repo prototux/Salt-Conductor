@@ -1,0 +1,405 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header, state_badge %}
+{% block breadcrumb %}
+<li class="breadcrumb-item"><a href="{{ url_for('minions.index') }}">Minions</a></li>
+<li class="breadcrumb-item active">{{ mid }}</li>
+{% endblock %}
+{% block page_title_extra %}<span class="status-dot {{ online }} ms-1" id="online-dot"></span>{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-xxl-3 col-xl-4">
+        <div class="card">
+            <div class="card-body">
+                <div class="text-center">
+                    <div class="avatar-lg mx-auto mb-2"><span class="avatar-title rounded-circle fs-36 {{ 'bg-primary-subtle text-primary' if online == 'up' else 'bg-danger-subtle text-danger' }}"><i class="ti ti-server-2"></i></span></div>
+                    <h4 class="mb-0">{{ mid }}</h4>
+                    <p class="text-muted mb-2">{{ summary.fqdn }}</p>
+                    {% if online == 'up' %}<span class="badge badge-soft-primary">responding</span>{% elif online == 'down' %}<span class="badge badge-soft-danger">not responding</span>{% else %}<span class="badge badge-soft-dark">status unknown</span>{% endif %}
+                    {{ key_state|status_badge }}
+                </div>
+                <hr class="border-dashed">
+                <dl class="row mb-0 fs-sm">
+                    <dt class="col-5 text-muted fw-semibold">OS</dt><dd class="col-7">{{ summary.osfinger }}</dd>
+                    <dt class="col-5 text-muted fw-semibold">Kernel</dt><dd class="col-7">{{ summary.kernel }}</dd>
+                    <dt class="col-5 text-muted fw-semibold">IPv4</dt><dd class="col-7 font-monospace">{{ summary.ipv4|join(', ') }}</dd>
+                    <dt class="col-5 text-muted fw-semibold">Roles</dt><dd class="col-7">{% for r in summary.roles if r %}<span class="badge badge-soft-info me-1">{{ r }}</span>{% endfor %}</dd>
+                    <dt class="col-5 text-muted fw-semibold">Environment</dt><dd class="col-7">{{ summary.environment or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-semibold">Datacenter</dt><dd class="col-7">{{ summary.datacenter or '-' }}</dd>
+                    <dt class="col-5 text-muted fw-semibold">CPU / RAM</dt><dd class="col-7">{{ summary.cpus }} cpu / {{ ((summary.mem or 0) / 1024)|round(1) }} GB</dd>
+                    <dt class="col-5 text-muted fw-semibold">Virtual</dt><dd class="col-7">{{ summary.virtual }}</dd>
+                    <dt class="col-5 text-muted fw-semibold">Salt</dt><dd class="col-7"><span class="badge badge-soft-secondary">{{ summary.saltversion }}</span></dd>
+                    <dt class="col-5 text-muted fw-semibold">States</dt><dd class="col-7">{{ state_badge(last) }}{% if last %} <span class="text-muted fs-xs">{{ last.time|timeago }}</span>{% endif %}</dd>
+                </dl>
+            </div>
+        </div>
+        <div class="card">
+            {{ card_header('Quick actions', 'bolt') }}
+            <div class="card-body d-grid gap-2">
+                <button class="btn btn-soft-primary text-start" data-action="ping"><i class="ti ti-heartbeat me-2"></i>Ping</button>
+                <button class="btn btn-soft-warning text-start" data-action="state_test"><i class="ti ti-eye-check me-2"></i>Test states (state.test)</button>
+                <button class="btn btn-primary text-start" data-action="state_apply" data-confirm="Apply all states (state.apply) on {{ mid }}?"><i class="ti ti-player-play me-2"></i>Apply states (state.apply)</button>
+                <button class="btn btn-soft-secondary text-start" data-action="refresh_pillar"><i class="ti ti-refresh me-2"></i>Refresh pillar</button>
+                <button class="btn btn-soft-secondary text-start" data-action="sync_all"><i class="ti ti-download me-2"></i>Sync custom modules</button>
+                <a class="btn btn-light text-start" href="{{ url_for('run.shell', tgt=mid) }}"><i class="ti ti-terminal-2 me-2"></i>Remote shell</a>
+                <a class="btn btn-light text-start" href="{{ url_for('run.index', tgt=mid, tgt_type='list') }}"><i class="ti ti-player-play me-2"></i>Run command…</a>
+            </div>
+            <div class="card-footer" id="quick-result" style="display:none"></div>
+        </div>
+    </div>
+
+    <div class="col-xxl-9 col-xl-8">
+        <div class="card">
+            <div class="card-header p-0 border-0">
+                <ul class="nav nav-tabs nav-bordered w-100 px-2 flex-nowrap overflow-auto" role="tablist">
+                    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#t-overview">Overview</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-grains" data-load="grains">Grains</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-pillar" data-load="pillar">Pillar</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-states" data-load="states">States</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-packages" data-load="packages">Packages</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-services" data-load="services">Services</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-system" data-load="system">System</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-schedule" data-load="schedule">Schedule</a></li>
+                    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#t-jobs">Jobs</a></li>
+                </ul>
+            </div>
+            <div class="card-body tab-content">
+                <!-- Overview -->
+                <div class="tab-pane fade show active" id="t-overview">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3"><div class="widget-bg navy"><i class="ti ti-cpu widget-icon"></i><span class="fs-xs text-uppercase fw-semibold">CPU</span><h2>{{ summary.cpus }}</h2><span class="fs-xs">{{ grains.cpu_model|default('')|truncate(28) }}</span></div></div>
+                        <div class="col-md-3"><div class="widget-bg blue"><i class="ti ti-database widget-icon"></i><span class="fs-xs text-uppercase fw-semibold">Memory</span><h2>{{ ((summary.mem or 0) / 1024)|round(1) }} GB</h2><span class="fs-xs">swap {{ grains.swap_total|default(0) }} MB</span></div></div>
+                        <div class="col-md-3"><div class="widget-bg lazur"><i class="ti ti-clock widget-icon"></i><span class="fs-xs text-uppercase fw-semibold">Uptime</span><h2 id="ov-uptime">…</h2><span class="fs-xs" id="ov-load">load …</span></div></div>
+                        <div class="col-md-3"><div class="widget-bg {{ 'red' if last and last.failed else 'yellow' if last and last.pending else 'navy' }}"><i class="ti ti-shield-check widget-icon"></i><span class="fs-xs text-uppercase fw-semibold">Last state run</span>
+                            <h2>{% if last %}{{ last.ok + last.changed }}/{{ last.total }}{% else %}-{% endif %}</h2><span class="fs-xs">{% if last %}{{ last.time|timeago }}{% else %}never applied{% endif %}</span></div></div>
+                    </div>
+                    <h5 class="mb-2">Disk usage</h5>
+                    <div id="ov-disks" class="mb-3"><span class="spinner-border spinner-border-sm text-primary"></span></div>
+                    <h5 class="mb-2">Recent jobs</h5>
+                    <table class="table table-sm table-hover mb-0">
+                        <thead><tr><th>Job</th><th>Function</th><th>User</th><th>When</th><th>Result</th></tr></thead>
+                        <tbody>
+                        {% for j in jobs[:6] %}
+                        <tr><td><a class="font-monospace" href="{{ url_for('jobs.detail', jid=j.jid) }}">{{ j.jid }}</a></td>
+                            <td><code>{{ j.fun }}</code></td><td>{{ j.user or '-' }}</td><td>{{ j.alter_time|timeago }}</td>
+                            <td>{% if j.success == 'true' %}<span class="badge badge-soft-primary">success</span>{% else %}<span class="badge badge-soft-danger">failed</span>{% endif %}</td></tr>
+                        {% else %}<tr><td colspan="5" class="text-muted">No jobs yet.</td></tr>{% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Grains -->
+                <div class="tab-pane fade" id="t-grains">
+                    <div class="d-flex gap-2 mb-3 flex-wrap">
+                        <input class="form-control form-control-sm w-auto flex-grow-1" id="grain-search" placeholder="Filter grains…">
+                        <button class="btn btn-sm btn-light" id="grains-live"><i class="ti ti-refresh me-1"></i>Live from minion</button>
+                        <button class="btn btn-sm btn-soft-primary" data-bs-toggle="collapse" data-bs-target="#grain-form"><i class="ti ti-plus me-1"></i>Set grain</button>
+                    </div>
+                    <div class="collapse mb-3" id="grain-form">
+                        <div class="row g-2 align-items-end bg-light bg-opacity-50 p-2 rounded">
+                            <div class="col-md-4"><label class="form-label fs-xs">Grain</label><input class="form-control form-control-sm font-monospace" id="grain-key" placeholder="roles"></div>
+                            <div class="col-md-5"><label class="form-label fs-xs">Value (YAML)</label><input class="form-control form-control-sm font-monospace" id="grain-value" placeholder="[web, api]"></div>
+                            <div class="col-md-3 d-flex gap-1"><button class="btn btn-sm btn-primary flex-grow-1" id="grain-save">Save</button><button class="btn btn-sm btn-soft-danger" id="grain-del" title="Delete grain"><i class="ti ti-trash"></i></button></div>
+                        </div>
+                    </div>
+                    <div id="grains-box"></div>
+                </div>
+
+                <!-- Pillar -->
+                <div class="tab-pane fade" id="t-pillar">
+                    <div class="d-flex gap-2 mb-3 align-items-center flex-wrap">
+                        <span class="text-muted fs-xs flex-grow-1">Merged pillar as compiled by the master (git pillar + database pillar + OpenBao secrets). Salt 3008 masks values unless explicitly revealed.</span>
+                        <button class="btn btn-sm btn-soft-warning" id="pillar-unmask"><i class="ti ti-eye me-1"></i>Reveal values</button>
+                        <button class="btn btn-sm btn-soft-secondary" data-action="refresh_pillar"><i class="ti ti-refresh me-1"></i>Refresh</button>
+                        <a class="btn btn-sm btn-light" href="{{ url_for('pillar_db.viewer', minion=mid) }}"><i class="ti ti-stack-2 me-1"></i>Sources</a>
+                    </div>
+                    <div id="pillar-box"></div>
+                </div>
+
+                <!-- States -->
+                <div class="tab-pane fade" id="t-states">
+                    <div class="row">
+                        <div class="col-lg-4">
+                            <h5>Top file assignment</h5>
+                            <p class="text-muted fs-xs">States this minion receives from <code>top.sls</code> (per saltenv).</p>
+                            <div id="top-box"></div>
+                            <div class="d-grid gap-2 mt-3">
+                                <button class="btn btn-soft-warning" data-action="state_test"><i class="ti ti-eye-check me-1"></i> Test (state.test)</button>
+                                <button class="btn btn-primary" data-action="state_apply" data-confirm="Apply all states (state.apply) on {{ mid }}?"><i class="ti ti-player-play me-1"></i> Apply (state.apply)</button>
+                            </div>
+                        </div>
+                        <div class="col-lg-8">
+                            <div class="d-flex align-items-center mb-2">
+                                <h5 class="mb-0 flex-grow-1">Last state run</h5>
+                                <div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" id="only-changes"><label class="form-check-label fs-xs" for="only-changes">Only changes / failures</label></div>
+                            </div>
+                            <div id="state-box"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Packages -->
+                <div class="tab-pane fade" id="t-packages">
+                    <div class="d-flex gap-2 mb-3 flex-wrap">
+                        <input class="form-control form-control-sm w-auto flex-grow-1" placeholder="Filter packages…" data-filter-table="#pkg-table">
+                        <div class="input-group input-group-sm w-auto">
+                            <input class="form-control font-monospace" id="pkg-name" placeholder="package name">
+                            <button class="btn btn-soft-primary" data-pkg="install">Install</button>
+                            <button class="btn btn-soft-danger" data-pkg="remove">Remove</button>
+                        </div>
+                        <button class="btn btn-sm btn-soft-warning" data-pkg="upgrade"><i class="ti ti-arrow-big-up-lines me-1"></i>Upgrade all</button>
+                    </div>
+                    <div class="table-responsive" style="max-height:560px">
+                        <table class="table table-sm table-hover mb-0" id="pkg-table"><thead><tr><th>Package</th><th>Version</th></tr></thead><tbody></tbody></table>
+                    </div>
+                </div>
+
+                <!-- Services -->
+                <div class="tab-pane fade" id="t-services">
+                    <input class="form-control form-control-sm mb-3" placeholder="Filter services…" data-filter-table="#svc-table">
+                    <div class="table-responsive" style="max-height:560px">
+                        <table class="table table-sm table-hover align-middle mb-0" id="svc-table"><thead><tr><th>Service</th><th>State</th><th class="text-end">Actions</th></tr></thead><tbody></tbody></table>
+                    </div>
+                </div>
+
+                <!-- System -->
+                <div class="tab-pane fade" id="t-system">
+                    <div class="row">
+                        <div class="col-lg-6"><h5>Network interfaces</h5><div id="net-box"></div></div>
+                        <div class="col-lg-6"><h5>Memory</h5><div id="mem-box"></div></div>
+                    </div>
+                    <h5 class="mt-3">Top processes</h5>
+                    <pre class="output" id="procs-box">…</pre>
+                    <h5 class="mt-3">Local users</h5>
+                    <div id="users-box"></div>
+                    <h5 class="mt-3">Versions report</h5>
+                    <pre class="output" id="versions-box">…</pre>
+                </div>
+
+                <!-- Schedule -->
+                <div class="tab-pane fade" id="t-schedule">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-muted fs-xs">Jobs scheduled on the minion (minion config, pillar and runtime schedule).</span>
+                        <a class="btn btn-sm btn-soft-primary" href="{{ url_for('schedules.index', tgt=mid) }}"><i class="ti ti-calendar-plus me-1"></i>Manage schedules</a>
+                    </div>
+                    <div id="schedule-box"></div>
+                    <h5 class="mt-3">Beacons</h5>
+                    <div id="beacons-box"></div>
+                </div>
+
+                <!-- Jobs -->
+                <div class="tab-pane fade" id="t-jobs">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead><tr><th>Job</th><th>Function</th><th>User</th><th>When</th><th>Result</th></tr></thead>
+                        <tbody>
+                        {% for j in jobs %}
+                        <tr><td><a class="font-monospace" href="{{ url_for('jobs.detail', jid=j.jid) }}">{{ j.jid }}</a></td>
+                            <td><code>{{ j.fun }}</code></td><td>{{ j.user or '-' }}</td><td>{{ j.alter_time|dt }}</td>
+                            <td>{% if j.success == 'true' %}<span class="badge badge-soft-primary">success</span>{% else %}<span class="badge badge-soft-danger">failed</span>{% endif %}</td></tr>
+                        {% else %}<tr><td colspan="5" class="text-muted">No jobs yet.</td></tr>{% endfor %}
+                        </tbody>
+                    </table>
+                    <a href="{{ url_for('jobs.index', minion=mid) }}" class="btn btn-sm btn-light mt-3">Full job history</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const MID = {{ mid|tojson }};
+    const base = '/api/minions/' + encodeURIComponent(MID);
+    const loaded = {};
+    const spinner = '<div class="empty-state"><span class="spinner-border text-primary"></span></div>';
+    const errBox = e => `<div class="alert alert-danger mb-0"><i class="ti ti-alert-circle me-1"></i>${SW.esc(e.message)}</div>`;
+    const section = s => SW.api(`${base}/section/${s}`, { quiet: true });
+
+    // --- quick actions
+    document.querySelectorAll('[data-action]').forEach(btn => btn.addEventListener('click', async () => {
+        if (btn.dataset.confirm && !(await SW.confirm('Confirm', btn.dataset.confirm, 'Apply', 'btn-primary'))) return;
+        SW.busy(btn, true);
+        try {
+            const res = await SW.api('/api/minions/action', { body: { action: btn.dataset.action, minions: [MID] } });
+            const box = document.getElementById('quick-result');
+            box.style.display = '';
+            if (res.jid) {
+                box.innerHTML = `<i class="ti ti-clock-play text-primary me-1"></i> Job <a class="font-monospace" href="/jobs/${res.jid}">${res.jid}</a> started`;
+                SW.toast('Job started: ' + res.jid);
+            } else {
+                const v = res.result?.[MID];
+                box.innerHTML = `<i class="ti ti-${v ? 'circle-check text-primary' : 'circle-x text-danger'} me-1"></i> <code>${SW.esc(res.fun)}</code>: ${SW.esc(JSON.stringify(v ?? 'no return'))}`;
+                if (btn.dataset.action === 'ping') document.getElementById('online-dot').className = 'status-dot ms-1 ' + (v ? 'up' : 'down');
+            }
+        } finally { SW.busy(btn, false); }
+    }));
+
+    // --- overview widgets
+    section('uptime').then(u => { document.getElementById('ov-uptime').textContent = (u.days ? u.days + 'd ' : '') + (u.time || ''); }).catch(() => { document.getElementById('ov-uptime').textContent = 'n/a'; });
+    section('loadavg').then(l => { document.getElementById('ov-load').textContent = 'load ' + ['1-min', '5-min', '15-min'].map(k => Number(l[k]).toFixed(2)).join(' / '); }).catch(() => {});
+    section('disks').then(d => {
+        const rows = Object.entries(d).filter(([m, v]) => v && Number(v['1K-blocks']) > 0 && !/^\/(proc|sys|dev|etc|run)(\/|$)/.test(m));
+        document.getElementById('ov-disks').innerHTML = rows.map(([m, v]) => {
+            const pct = parseInt(v.capacity) || 0;
+            const cls = pct > 90 ? 'bg-danger' : pct > 75 ? 'bg-warning' : '';
+            return `<div class="mb-2"><div class="d-flex justify-content-between fs-xs"><span class="font-monospace fw-semibold">${SW.esc(m)}</span>
+                <span class="text-muted">${(v.used / 1048576).toFixed(1)} / ${(v['1K-blocks'] / 1048576).toFixed(1)} GB &middot; ${pct}%</span></div>
+                <div class="progress" style="height:6px"><div class="progress-bar ${cls}" style="width:${pct}%"></div></div></div>`;
+        }).join('') || '<span class="text-muted">No data</span>';
+    }).catch(e => { document.getElementById('ov-disks').innerHTML = errBox(e); });
+
+    // --- lazy tabs
+    const loaders = {
+        grains(live) {
+            const box = document.getElementById('grains-box');
+            box.innerHTML = spinner;
+            SW.api(`${base}/grains${live ? '?live=1' : ''}`).then(g => {
+                window._grains = g;
+                box.innerHTML = '';
+                box.appendChild(SW.jsonTree(g, { open: 1 }));
+            }).catch(e => { box.innerHTML = errBox(e); });
+        },
+        pillar(unmask) {
+            const box = document.getElementById('pillar-box');
+            box.innerHTML = spinner;
+            SW.api(`${base}/pillar${unmask ? '?unmask=1' : ''}`).then(p => { box.innerHTML = ''; box.appendChild(SW.jsonTree(p, { open: 1 })); })
+                .catch(e => { box.innerHTML = errBox(e); });
+        },
+        states() {
+            const top = document.getElementById('top-box');
+            top.innerHTML = spinner;
+            section('top').then(t => {
+                if (Array.isArray(t)) { top.innerHTML = `<div class="alert alert-danger">${SW.esc(t.join('\n'))}</div>`; return; }
+                top.innerHTML = Object.entries(t).map(([env, sls]) => `<div class="mb-2"><span class="badge badge-soft-dark mb-1">saltenv: ${SW.esc(env)}</span><ul class="list-group">
+                    ${sls.map(s => `<li class="list-group-item d-flex align-items-center py-2"><i class="ti ti-file-code text-muted me-2"></i><span class="font-monospace flex-grow-1">${SW.esc(typeof s === 'string' ? s : JSON.stringify(s))}</span>
+                    <a class="btn btn-sm btn-light" title="Test this SLS (state.test)" href="/run?tgt_type=list&tgt=${encodeURIComponent(MID)}&fun=state.test&args=${encodeURIComponent(s)}"><i class="ti ti-player-play"></i></a></li>`).join('')}</ul></div>`).join('')
+                    || '<div class="text-muted">No states assigned.</div>';
+            }).catch(e => { top.innerHTML = errBox(e); });
+            renderLastState();
+        },
+        packages() {
+            const tb = document.querySelector('#pkg-table tbody');
+            tb.innerHTML = `<tr><td colspan="2">${spinner}</td></tr>`;
+            section('packages').then(p => {
+                tb.innerHTML = Object.entries(p).sort().map(([n, v]) => `<tr><td class="font-monospace">${SW.esc(n)}</td><td class="font-monospace text-muted">${SW.esc(Array.isArray(v) ? v.join(', ') : v)}</td></tr>`).join('');
+            }).catch(e => { tb.innerHTML = `<tr><td colspan="2">${errBox(e)}</td></tr>`; });
+        },
+        services() {
+            const tb = document.querySelector('#svc-table tbody');
+            tb.innerHTML = `<tr><td colspan="3">${spinner}</td></tr>`;
+            Promise.all([section('services'), section('running').catch(() => [])]).then(([all, running]) => {
+                const run = new Set(running || []);
+                tb.innerHTML = (all || []).map(s => `<tr><td class="font-monospace">${SW.esc(s)}</td>
+                    <td>${run.has(s) ? '<span class="badge badge-soft-primary">running</span>' : '<span class="badge badge-soft-dark">stopped</span>'}</td>
+                    <td class="text-end"><div class="btn-group btn-group-sm">
+                        <button class="btn btn-light" data-svc="start" data-name="${SW.esc(s)}" title="Start"><i class="ti ti-player-play"></i></button>
+                        <button class="btn btn-light" data-svc="restart" data-name="${SW.esc(s)}" title="Restart"><i class="ti ti-refresh"></i></button>
+                        <button class="btn btn-light" data-svc="stop" data-name="${SW.esc(s)}" title="Stop"><i class="ti ti-player-stop"></i></button>
+                    </div></td></tr>`).join('') || '<tr><td colspan="3" class="text-muted">No services reported.</td></tr>';
+            }).catch(e => { tb.innerHTML = `<tr><td colspan="3">${errBox(e)}</td></tr>`; });
+        },
+        system() {
+            const boxes = { network: 'net-box', meminfo: 'mem-box', users: 'users-box' };
+            for (const [s, id] of Object.entries(boxes)) {
+                const box = document.getElementById(id);
+                box.innerHTML = spinner;
+                section(s).then(d => {
+                    box.innerHTML = '';
+                    if (s === 'network') {
+                        box.innerHTML = `<table class="table table-sm"><thead><tr><th>Iface</th><th>Address</th><th>MAC</th><th>Up</th></tr></thead><tbody>${
+                            Object.entries(d).map(([n, i]) => `<tr><td class="fw-semibold">${SW.esc(n)}</td><td class="font-monospace">${(i.inet || []).map(a => SW.esc(a.address + '/' + (a.netmask || ''))).join('<br>')}</td><td class="font-monospace">${SW.esc(i.hwaddr || '')}</td><td>${i.up ? '<span class="badge badge-soft-primary">up</span>' : '<span class="badge badge-soft-dark">down</span>'}</td></tr>`).join('')}</tbody></table>`;
+                    } else if (s === 'users') {
+                        box.innerHTML = (d || []).map(u => `<span class="badge badge-soft-secondary me-1 mb-1">${SW.esc(u)}</span>`).join('');
+                    } else {
+                        const pick = ['MemTotal', 'MemFree', 'MemAvailable', 'Buffers', 'Cached', 'SwapTotal', 'SwapFree'];
+                        box.innerHTML = `<table class="table table-sm">${pick.filter(k => d[k]).map(k => `<tr><td class="text-muted">${k}</td><td class="text-end">${(d[k].value / 1024).toFixed(0)} MB</td></tr>`).join('')}</table>`;
+                    }
+                }).catch(e => { box.innerHTML = errBox(e); });
+            }
+            section('procs').then(t => { document.getElementById('procs-box').textContent = t; }).catch(e => { document.getElementById('procs-box').textContent = e.message; });
+            section('versions').then(t => { document.getElementById('versions-box').textContent = t; }).catch(e => { document.getElementById('versions-box').textContent = e.message; });
+        },
+        schedule() {
+            const box = document.getElementById('schedule-box');
+            box.innerHTML = spinner;
+            section('schedule').then(s => {
+                const jobs = Object.entries(s || {}).filter(([k]) => k !== 'enabled');
+                box.innerHTML = jobs.length ? `<table class="table table-sm"><thead><tr><th>Name</th><th>Function</th><th>Interval</th><th>Enabled</th></tr></thead><tbody>${
+                    jobs.map(([n, j]) => `<tr><td class="fw-semibold">${SW.esc(n)}</td><td><code>${SW.esc(j.function)}</code></td><td>${SW.esc(['seconds', 'minutes', 'hours', 'days'].filter(k => j[k]).map(k => j[k] + ' ' + k).join(' ') || j.cron || j.when || '-')}</td><td>${j.enabled === false ? '<span class="badge badge-soft-dark">disabled</span>' : '<span class="badge badge-soft-primary">enabled</span>'}</td></tr>`).join('')}</tbody></table>`
+                    : '<div class="text-muted">No scheduled jobs.</div>';
+            }).catch(e => { box.innerHTML = errBox(e); });
+            const bb = document.getElementById('beacons-box');
+            section('beacons').then(b => {
+                const items = Object.entries(b || {}).filter(([k]) => k !== 'enabled');
+                bb.innerHTML = items.length ? '' : '<div class="text-muted">No beacons configured.</div>';
+                if (items.length) bb.appendChild(SW.jsonTree(Object.fromEntries(items)));
+            }).catch(e => { bb.innerHTML = errBox(e); });
+        },
+    };
+
+    function renderLastState() {
+        const box = document.getElementById('state-box');
+        box.innerHTML = spinner;
+        SW.api(`${base}/states`).then(r => {
+            if (!r) { box.innerHTML = '<div class="empty-state"><i class="ti ti-shield-question"></i>No state run recorded yet.</div>'; return; }
+            const s = r.summary;
+            box.innerHTML = `<div class="d-flex flex-wrap gap-1 align-items-center mb-2">${SW.summaryBadges(s)}
+                <span class="ms-auto fs-xs text-muted"><a class="font-monospace" href="/jobs/${r.jid}">${r.jid}</a> &middot; ${SW.esc(r.fun)} &middot; ${SW.timeago(r.time)}</span></div>`;
+            box.appendChild(SW.renderValue(r.ret, { onlyChanges: document.getElementById('only-changes').checked, stateFun: true }));
+        }).catch(e => { box.innerHTML = errBox(e); });
+    }
+    document.getElementById('only-changes').addEventListener('change', renderLastState);
+
+    document.querySelectorAll('[data-load]').forEach(tab => tab.addEventListener('shown.bs.tab', () => {
+        const k = tab.dataset.load;
+        if (!loaded[k]) { loaded[k] = true; loaders[k](); }
+    }));
+
+    document.getElementById('grains-live').addEventListener('click', () => loaders.grains(true));
+    document.getElementById('grain-search').addEventListener('input', SW.debounce(e => {
+        const q = e.target.value.toLowerCase();
+        const g = window._grains || {};
+        const box = document.getElementById('grains-box');
+        box.innerHTML = '';
+        box.appendChild(SW.jsonTree(q ? Object.fromEntries(Object.entries(g).filter(([k, v]) => k.toLowerCase().includes(q) || JSON.stringify(v).toLowerCase().includes(q))) : g, { open: q ? 3 : 1 }));
+    }, 200));
+    async function grainOp(del) {
+        const key = document.getElementById('grain-key').value.trim();
+        if (!key) return SW.toast('Grain name required', 'warning');
+        if (del && !(await SW.confirm('Delete grain?', `Remove grain "${key}" from ${MID}.`, 'Delete'))) return;
+        let value = document.getElementById('grain-value').value;
+        try { value = JSON.parse(value); } catch (e) { /* keep string; YAML parsed server-side as string */ }
+        await SW.api(`${base}/grains/set`, { body: { key, value, delete: del } });
+        SW.toast(del ? 'Grain deleted' : 'Grain saved');
+        loaders.grains(true);
+    }
+    document.getElementById('grain-save').addEventListener('click', () => grainOp(false));
+    document.getElementById('grain-del').addEventListener('click', () => grainOp(true));
+
+    document.getElementById('pillar-unmask').addEventListener('click', async () => {
+        if (await SW.confirm('Reveal pillar values?', 'Secrets will be displayed in clear text. This action is recorded in the audit log.', 'Reveal', 'btn-warning')) loaders.pillar(true);
+    });
+
+    document.getElementById('svc-table').addEventListener('click', async e => {
+        const b = e.target.closest('[data-svc]');
+        if (!b) return;
+        if (!(await SW.confirm(`${b.dataset.svc} ${b.dataset.name}?`, `On minion ${MID}.`, 'Confirm', 'btn-primary'))) return;
+        const r = await SW.api(`${base}/service`, { body: { name: b.dataset.name, op: b.dataset.svc } });
+        SW.toast(`${b.dataset.svc} ${b.dataset.name}: ${JSON.stringify(r.result)}`, r.result ? 'primary' : 'warning');
+        loaders.services();
+    });
+    document.querySelectorAll('[data-pkg]').forEach(b => b.addEventListener('click', async () => {
+        const op = b.dataset.pkg, name = document.getElementById('pkg-name').value.trim();
+        if (op !== 'upgrade' && !name) return SW.toast('Package name required', 'warning');
+        if (!(await SW.confirm(`${op} ${op === 'upgrade' ? 'all packages' : name}?`, `On minion ${MID}.`, 'Confirm', op === 'remove' ? 'btn-danger' : 'btn-primary'))) return;
+        SW.busy(b, true);
+        try {
+            const r = await SW.api(`${base}/pkg`, { body: { name, op } });
+            if (r.jid) SW.toast('Upgrade job started: ' + r.jid);
+            else { SW.toast(`${op} ${name}: done`); loaders.packages(); }
+        } finally { SW.busy(b, false); }
+    }));
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header %}
+{% block content %}
+<div class="alert alert-warning d-none" id="pending-alert">
+    <i class="ti ti-key me-1"></i> <span id="pending-count"></span> minion key(s) waiting for approval.
+    <a href="{{ url_for('keys.index') }}" class="alert-link">Review keys</a>
+</div>
+
+<div class="card" id="minions-card">
+    <div class="card-header flex-wrap">
+        <h4 class="card-title">Accepted minions <span class="badge badge-soft-secondary ms-1" id="minion-count">…</span></h4>
+        <div class="card-actions flex-wrap gap-2">
+            <div class="app-search"><input class="form-control form-control-sm" style="width:220px;padding-left:32px;height:32px" placeholder="Filter…" data-filter-table="#minions-table"><i class="ti ti-search app-search-icon text-muted fs-sm"></i></div>
+            <select class="form-select form-select-sm w-auto" id="status-filter">
+                <option value="">All statuses</option><option value="up">Responding</option><option value="down">Not responding</option>
+            </select>
+            <div class="btn-group">
+                <button class="btn btn-sm btn-soft-primary dropdown-toggle" data-bs-toggle="dropdown" id="bulk-btn" disabled><i class="ti ti-bolt me-1"></i>Actions (<span id="sel-count">0</span>)</button>
+                <ul class="dropdown-menu dropdown-menu-end">
+                    <li><a class="dropdown-item" href="#" data-bulk="ping"><i class="ti ti-heartbeat me-1"></i> Ping</a></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="state_test"><i class="ti ti-eye-check me-1"></i> Test states (state.test)</a></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="state_apply"><i class="ti ti-player-play me-1"></i> Apply states (state.apply)</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="refresh_pillar"><i class="ti ti-refresh me-1"></i> Refresh pillar</a></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="refresh_grains"><i class="ti ti-refresh me-1"></i> Refresh grains</a></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="sync_all"><i class="ti ti-download me-1"></i> Sync modules (sync_all)</a></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="update_mine"><i class="ti ti-pick me-1"></i> Update mine</a></li>
+                    <li><hr class="dropdown-divider"></li>
+                    <li><a class="dropdown-item" href="#" data-bulk="run"><i class="ti ti-terminal-2 me-1"></i> Run command on selection…</a></li>
+                </ul>
+            </div>
+            <button class="btn btn-sm btn-light" id="refresh-btn"><i class="ti ti-refresh"></i></button>
+        </div>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover table-nowrap align-middle mb-0" id="minions-table">
+            <thead><tr>
+                <th style="width:30px"><input type="checkbox" class="form-check-input" data-check-all=".row-check"></th>
+                <th>Minion</th><th>OS</th><th>IP address</th><th>Roles</th><th>Env / DC</th><th>Salt</th><th>CPU / RAM</th><th>Last state run</th><th></th>
+            </tr></thead>
+            <tbody><tr><td colspan="10"><div class="empty-state"><span class="spinner-border text-primary"></span></div></td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-6">
+        <div class="card">
+            {{ card_header('Nodegroups', 'sitemap') }}
+            <div class="card-body p-0"><table class="table table-sm mb-0" id="nodegroups"><tbody><tr><td class="text-muted p-3">Loading…</td></tr></tbody></table></div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card" id="result-card" style="display:none">
+            {{ card_header('Action result', 'terminal') }}
+            <div class="card-body" id="action-result"></div>
+        </div>
+    </div>
+</div>
+<datalist id="minion-ids"></datalist>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const tbody = document.querySelector('#minions-table tbody');
+    const selCount = document.getElementById('sel-count');
+    const bulkBtn = document.getElementById('bulk-btn');
+
+    function stateBadge(s) {
+        if (!s) return '<span class="badge badge-soft-dark">never</span>';
+        const when = `<div class="text-muted fs-xxs">${SW.timeago(s.time)}${s.test ? ' &middot; test' : ''}</div>`;
+        let b;
+        if (s.failed) b = `<span class="badge badge-soft-danger">${s.failed} failed</span>`;
+        else if (s.pending) b = `<span class="badge badge-soft-warning">${s.pending} drift</span>`;
+        else if (s.changed) b = `<span class="badge badge-soft-primary">compliant</span> <span class="badge badge-soft-secondary">${s.changed} applied</span>`;
+        else b = '<span class="badge badge-soft-primary">compliant</span>';
+        return `<a href="/jobs/${s.jid}">${b}</a>${when}`;
+    }
+
+    function render(data) {
+        document.getElementById('minion-count').textContent = data.minions.length;
+        if (data.pending.length) {
+            document.getElementById('pending-alert').classList.remove('d-none');
+            document.getElementById('pending-count').textContent = data.pending.length;
+        }
+        document.getElementById('minion-ids').innerHTML = data.minions.map(m => `<option value="${SW.esc(m.id)}">`).join('');
+        const filter = document.getElementById('status-filter').value;
+        const rows = data.minions.filter(m => !filter || m.status === filter);
+        tbody.innerHTML = rows.map(m => `<tr data-status="${m.status}">
+            <td><input type="checkbox" class="form-check-input row-check" value="${SW.esc(m.id)}"></td>
+            <td><span class="status-dot ${m.status} me-2"></span><a class="fw-semibold" href="/minions/${encodeURIComponent(m.id)}">${SW.esc(m.id)}</a>
+                <div class="text-muted fs-xxs ms-3">${SW.esc(m.fqdn || '')}</div></td>
+            <td>${SW.esc(m.osfinger)}<div class="text-muted fs-xxs">${SW.esc(m.kernel)}</div></td>
+            <td class="font-monospace">${SW.esc(m.ip)}</td>
+            <td>${(m.roles || []).filter(Boolean).map(r => `<span class="badge badge-soft-info me-1">${SW.esc(r)}</span>`).join('')}</td>
+            <td>${SW.esc(m.environment || '-')}<div class="text-muted fs-xxs">${SW.esc(m.datacenter || '')}</div></td>
+            <td><span class="badge badge-soft-secondary">${SW.esc(m.saltversion)}</span></td>
+            <td>${SW.esc(m.cpus)} cpu<div class="text-muted fs-xxs">${m.mem ? Math.round(m.mem / 1024 * 10) / 10 + ' GB' : ''}</div></td>
+            <td>${stateBadge(m.last_state)}</td>
+            <td class="table-actions">
+                <div class="btn-group">
+                    <a href="/minions/${encodeURIComponent(m.id)}" class="btn btn-sm btn-light">Details</a>
+                    <button class="btn btn-sm btn-light dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown"></button>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><a class="dropdown-item" href="#" data-one="ping" data-m="${SW.esc(m.id)}">Ping</a></li>
+                        <li><a class="dropdown-item" href="#" data-one="state_test" data-m="${SW.esc(m.id)}">Test states (state.test)</a></li>
+                        <li><a class="dropdown-item" href="#" data-one="state_apply" data-m="${SW.esc(m.id)}">Apply states (state.apply)</a></li>
+                        <li><a class="dropdown-item" href="/shell?tgt=${encodeURIComponent(m.id)}">Remote shell</a></li>
+                        <li><a class="dropdown-item" href="/jobs?minion=${encodeURIComponent(m.id)}">Job history</a></li>
+                    </ul>
+                </div>
+            </td></tr>`).join('') || '<tr><td colspan="10"><div class="empty-state"><i class="ti ti-server-off"></i>No minions</div></td></tr>';
+        const ng = Object.entries(data.nodegroups || {});
+        document.querySelector('#nodegroups tbody').innerHTML = ng.map(([n, e]) => `<tr>
+            <td class="fw-semibold ps-3">${SW.esc(n)}</td><td class="font-monospace">${SW.esc(Array.isArray(e) ? e.join(', ') : e)}</td>
+            <td class="text-end pe-3"><a class="btn btn-sm btn-light" href="/run?tgt_type=nodegroup&tgt=${encodeURIComponent(n)}">Target</a></td></tr>`).join('')
+            || '<tr><td class="text-muted p-3">No nodegroups configured on the master.</td></tr>';
+        updateSel();
+    }
+
+    let data = null;
+    function load(refresh) {
+        const card = document.getElementById('minions-card');
+        SW.loading(card, true);
+        SW.api('/api/minions' + (refresh ? '?refresh=1' : '')).then(d => { data = d; render(d); }).finally(() => SW.loading(card, false));
+    }
+
+    function selected() { return [...document.querySelectorAll('.row-check:checked')].map(c => c.value); }
+    function updateSel() { const n = selected().length; selCount.textContent = n; bulkBtn.disabled = !n; }
+    document.addEventListener('change', e => { if (e.target.matches('.row-check, [data-check-all]')) updateSel(); });
+    document.getElementById('status-filter').addEventListener('change', () => data && render(data));
+    document.getElementById('refresh-btn').addEventListener('click', () => load(true));
+
+    async function runAction(action, minions) {
+        if (action === 'run') { location = '/run?tgt_type=list&tgt=' + encodeURIComponent(minions.join(',')); return; }
+        if (action === 'state_apply' && !(await SW.confirm('Apply states?', `This runs state.apply (top file) on ${minions.length} minion(s).`, 'Apply', 'btn-primary'))) return;
+        const res = await SW.api('/api/minions/action', { body: { action, minions } });
+        const card = document.getElementById('result-card');
+        card.style.display = '';
+        const box = document.getElementById('action-result');
+        if (res.jid) {
+            box.innerHTML = `<div class="alert alert-info mb-0"><i class="ti ti-clock-play me-1"></i> Job <a class="alert-link font-monospace" href="/jobs/${res.jid}">${res.jid}</a> started on ${res.minions.length} minion(s) (<code>${SW.esc(res.fun)}</code>).</div>`;
+            SW.toast('Job ' + res.jid + ' started', 'primary');
+        } else {
+            SW.renderResults(box, res.result);
+        }
+        card.scrollIntoView({ behavior: 'smooth' });
+    }
+    document.querySelectorAll('[data-bulk]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); runAction(a.dataset.bulk, selected()); }));
+    tbody.addEventListener('click', e => {
+        const a = e.target.closest('[data-one]');
+        if (a) { e.preventDefault(); runAction(a.dataset.one, [a.dataset.m]); }
+    });
+    load(false);
+})();
+</script>
+{% endblock %}
