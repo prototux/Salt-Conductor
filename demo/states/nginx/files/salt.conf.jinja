@@ -1,0 +1,8 @@
+# Managed by Salt - do not edit
+# worker_processes {{ worker_processes }} (set in nginx.conf)
+server {
+    listen 8081;
+    server_name {{ server_name }};
+    root /var/www/html;
+    location /healthz { return 200 "ok\n"; }
+}
