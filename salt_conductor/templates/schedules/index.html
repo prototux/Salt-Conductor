@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% from "macros.html" import target_fields %}
+{% block content %}
+<div class="row">
+    <div class="col-xl-8">
+        <div class="card" id="sched-card">
+            <div class="card-header flex-wrap gap-2">
+                <h4 class="card-title">Minion schedules</h4>
+                <div class="card-actions gap-2" style="min-width:360px">{{ target_fields(request.args.tgt or '*', 'list' if request.args.tgt else 'glob', target_types, 'sm') }}
+                    <button class="btn btn-sm btn-primary" id="load"><i class="ti ti-search"></i></button></div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead><tr><th>Job</th><th>Function</th><th>Arguments</th><th>When</th><th>Minions</th><th>Status</th><th></th></tr></thead>
+                    <tbody id="sched-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-4">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-calendar-plus me-1 text-muted"></i>New scheduled job</h4></div>
+            <div class="card-body">
+                <p class="text-muted fs-xs">Added with <code>schedule.add</code> on the minions matching the target above (persisted to <code>/etc/salt/minion.d/_schedule.conf</code>).</p>
+                <div class="mb-2"><label class="form-label">Name</label><input class="form-control" id="s-name" placeholder="nightly-state-apply"></div>
+                <div class="mb-2"><label class="form-label">Function</label><input class="form-control font-monospace" id="s-fun" value="state.apply"></div>
+                <div class="mb-2"><label class="form-label">Arguments</label><input class="form-control font-monospace" id="s-args" placeholder="test=True"></div>
+                <div class="mb-2"><label class="form-label">Every</label>
+                    <div class="input-group"><input type="number" class="form-control" id="s-every" value="60" min="1">
+                        <select class="form-select" id="s-unit"><option>seconds</option><option selected>minutes</option><option>hours</option><option>days</option></select></div></div>
+                <div class="mb-2"><label class="form-label">…or cron expression <span class="text-muted fw-normal fs-xs">(needs croniter on minion)</span></label><input class="form-control font-monospace" id="s-cron" placeholder="0 3 * * *"></div>
+                <div class="mb-3"><label class="form-label">Splay (s)</label><input type="number" class="form-control" id="s-splay" placeholder="0"></div>
+                <button class="btn btn-primary w-100" id="add"><i class="ti ti-plus me-1"></i>Add to targeted minions</button>
+            </div>
+        </div>
+    </div>
+</div>
+<datalist id="minion-ids">{% for m in minions %}<option value="{{ m }}">{% endfor %}</datalist>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const $ = id => document.getElementById(id);
+    const tb = $('sched-body');
+    async function load() {
+        SW.loading($('sched-card'), true);
+        try {
+            const d = await SW.api(`/api/schedules?tgt=${encodeURIComponent($('tgt').value)}&tgt_type=${$('tgt_type').value}`);
+            const jobs = {};
+            for (const [m, sched] of Object.entries(d)) {
+                if (!sched || typeof sched !== 'object') continue;
+                for (const [name, j] of Object.entries(sched)) {
+                    if (name === 'enabled' || typeof j !== 'object') continue;
+                    const key = name + '|' + JSON.stringify([j.function, j.job_args, j.job_kwargs, j.seconds, j.minutes, j.hours, j.days, j.cron]);
+                    (jobs[key] = jobs[key] || { name, j, minions: [], enabled: [] }).minions.push(m);
+                    if (j.enabled !== false) jobs[key].enabled.push(m);
+                }
+            }
+            tb.innerHTML = Object.values(jobs).map(({ name, j, minions, enabled }) => {
+                const when = j.cron ? 'cron ' + j.cron : ['days', 'hours', 'minutes', 'seconds'].filter(k => j[k]).map(k => `every ${j[k]} ${k}`).join(' ') || j.when || '-';
+                const all = enabled.length === minions.length;
+                return `<tr><td class="fw-semibold">${SW.esc(name)}</td><td><code>${SW.esc(j.function)}</code></td>
+                    <td class="font-monospace fs-xs">${SW.esc([...(j.job_args || []), ...Object.entries(j.job_kwargs || {}).map(([k, v]) => k + '=' + JSON.stringify(v))].join(' '))}</td>
+                    <td>${SW.esc(when)}${j.splay ? ` <span class="text-muted fs-xs">(splay ${j.splay}s)</span>` : ''}</td>
+                    <td>${minions.map(m => `<span class="badge badge-soft-info me-1">${SW.esc(m)}</span>`).join('')}</td>
+                    <td>${all ? '<span class="badge badge-soft-primary">enabled</span>' : enabled.length ? '<span class="badge badge-soft-warning">partial</span>' : '<span class="badge badge-soft-dark">disabled</span>'}</td>
+                    <td class="table-actions" data-name="${SW.esc(name)}" data-minions="${SW.esc(minions.join(','))}">
+                        <button class="btn btn-sm btn-light" data-op="run" title="Run now"><i class="ti ti-player-play"></i></button>
+                        <button class="btn btn-sm btn-light" data-op="${all ? 'disable' : 'enable'}" title="${all ? 'Disable' : 'Enable'}"><i class="ti ti-${all ? 'player-pause' : 'player-play'}"></i></button>
+                        <button class="btn btn-sm btn-soft-danger" data-op="delete" title="Delete"><i class="ti ti-trash"></i></button></td></tr>`;
+            }).join('') || '<tr><td colspan="7"><div class="empty-state"><i class="ti ti-calendar-off"></i>No scheduled jobs on these minions</div></td></tr>';
+        } finally { SW.loading($('sched-card'), false); }
+    }
+    tb.addEventListener('click', async e => {
+        const b = e.target.closest('[data-op]');
+        if (!b) return;
+        const td = b.closest('td');
+        if (b.dataset.op === 'delete' && !(await SW.confirm('Delete schedule ' + td.dataset.name + '?', td.dataset.minions, 'Delete'))) return;
+        await SW.api('/api/schedules/' + b.dataset.op, { body: { name: td.dataset.name, minions: td.dataset.minions } });
+        SW.toast(`${b.dataset.op}: ${td.dataset.name}`); load();
+    });
+    $('add').addEventListener('click', async () => {
+        await SW.api('/api/schedules', { body: { tgt: $('tgt').value, tgt_type: $('tgt_type').value, name: $('s-name').value, function: $('s-fun').value,
+            args: $('s-args').value, every: $('s-every').value, unit: $('s-unit').value, cron: $('s-cron').value, splay: $('s-splay').value } });
+        SW.toast('Schedule added'); load();
+    });
+    $('load').addEventListener('click', load);
+    load();
+})();
+</script>
+{% endblock %}
