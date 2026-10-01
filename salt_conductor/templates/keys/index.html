@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row row-cols-xl-4 row-cols-sm-2 row-cols-1" id="key-kpis"></div>
+
+<div class="card" id="keys-card">
+    <div class="card-header p-0 border-0">
+        <ul class="nav nav-tabs nav-bordered w-100 px-2" id="key-tabs">
+            <li class="nav-item"><a class="nav-link active" href="#" data-group="minions_pre">Pending <span class="badge badge-soft-warning ms-1" data-count="minions_pre">0</span></a></li>
+            <li class="nav-item"><a class="nav-link" href="#" data-group="minions">Accepted <span class="badge badge-soft-primary ms-1" data-count="minions">0</span></a></li>
+            <li class="nav-item"><a class="nav-link" href="#" data-group="minions_rejected">Rejected <span class="badge badge-soft-danger ms-1" data-count="minions_rejected">0</span></a></li>
+            <li class="nav-item"><a class="nav-link" href="#" data-group="minions_denied">Denied <span class="badge badge-soft-dark ms-1" data-count="minions_denied">0</span></a></li>
+        </ul>
+    </div>
+    <div class="card-body">
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+            <input class="form-control form-control-sm w-auto flex-grow-1" placeholder="Filter keys…" data-filter-table="#keys-table">
+            <button class="btn btn-sm btn-primary" data-op="accept"><i class="ti ti-check me-1"></i>Accept</button>
+            <button class="btn btn-sm btn-soft-warning" data-op="reject"><i class="ti ti-ban me-1"></i>Reject</button>
+            <button class="btn btn-sm btn-soft-danger" data-op="delete"><i class="ti ti-trash me-1"></i>Delete</button>
+            <button class="btn btn-sm btn-light" id="reload"><i class="ti ti-refresh"></i></button>
+        </div>
+        <div class="alert alert-info fs-xs"><i class="ti ti-info-circle me-1"></i>Always compare the fingerprint with the one reported by the minion
+            (<code>salt-call --local key.finger</code>) before accepting a key.</div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" id="keys-table">
+                <thead><tr><th style="width:30px"><input type="checkbox" class="form-check-input" data-check-all=".key-check"></th><th>Minion ID</th><th>Fingerprint</th><th class="text-end">Actions</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    let data = null, group = 'minions_pre';
+    const tbody = document.querySelector('#keys-table tbody');
+    const meta = {
+        minions_pre: ['Pending', 'warning', 'clock', ['accept', 'reject', 'delete']],
+        minions: ['Accepted', 'primary', 'circle-check', ['reject', 'delete']],
+        minions_rejected: ['Rejected', 'danger', 'ban', ['accept', 'delete']],
+        minions_denied: ['Denied', 'dark', 'lock', ['accept', 'delete']],
+    };
+    function render() {
+        const list = (data.keys[group] || []).slice().sort();
+        document.querySelectorAll('[data-count]').forEach(el => { el.textContent = (data.keys[el.dataset.count] || []).length; });
+        document.getElementById('key-kpis').innerHTML = Object.entries(meta).map(([g, [label, cls, icon]]) => `
+            <div class="col"><div class="card stat-card"><div class="card-body d-flex align-items-center gap-3">
+                <div class="avatar-md"><span class="avatar-title rounded-circle bg-${cls}-subtle text-${cls === 'dark' ? 'body' : cls}"><i class="ti ti-${icon}"></i></span></div>
+                <div><h5 class="mb-1">${label}</h5><h3 class="mb-0">${(data.keys[g] || []).length}</h3></div></div></div></div>`).join('');
+        const actions = meta[group][3];
+        document.querySelectorAll('[data-op]').forEach(b => { b.style.display = actions.includes(b.dataset.op) ? '' : 'none'; });
+        tbody.innerHTML = list.map(m => `<tr>
+            <td><input type="checkbox" class="form-check-input key-check" value="${SW.esc(m)}"></td>
+            <td class="fw-semibold">${group === 'minions' ? `<a href="/minions/${encodeURIComponent(m)}">${SW.esc(m)}</a>` : SW.esc(m)}</td>
+            <td class="font-monospace fs-xs text-muted">${SW.esc(data.fingers[m] || '')}</td>
+            <td class="table-actions">${actions.map(op => `<button class="btn btn-sm ${op === 'accept' ? 'btn-soft-primary' : op === 'reject' ? 'btn-soft-warning' : 'btn-soft-danger'} ms-1" data-row-op="${op}" data-m="${SW.esc(m)}">${op}</button>`).join('')}</td>
+        </tr>`).join('') || `<tr><td colspan="4"><div class="empty-state"><i class="ti ti-key-off"></i>No ${meta[group][0].toLowerCase()} keys</div></td></tr>`;
+    }
+    function load() {
+        const card = document.getElementById('keys-card');
+        SW.loading(card, true);
+        SW.api('/api/keys').then(d => { data = d; if (!d.keys.minions_pre?.length && group === 'minions_pre' && !load.done) { group = 'minions'; activate(); } load.done = true; render(); })
+            .finally(() => SW.loading(card, false));
+    }
+    function activate() { document.querySelectorAll('#key-tabs .nav-link').forEach(a => a.classList.toggle('active', a.dataset.group === group)); }
+    document.querySelectorAll('#key-tabs .nav-link').forEach(a => a.addEventListener('click', e => { e.preventDefault(); group = a.dataset.group; activate(); render(); }));
+    async function op(name, minions) {
+        if (!minions.length) return SW.toast('Select at least one key', 'warning');
+        const danger = name !== 'accept';
+        if (!(await SW.confirm(`${name} ${minions.length} key(s)?`, minions.join(', '), name, danger ? 'btn-danger' : 'btn-primary'))) return;
+        await SW.api('/api/keys/' + name, { body: { minions } });
+        SW.toast(`${name}: ${minions.join(', ')}`);
+        load();
+    }
+    document.querySelectorAll('[data-op]').forEach(b => b.addEventListener('click', () => op(b.dataset.op, [...document.querySelectorAll('.key-check:checked')].map(c => c.value))));
+    tbody.addEventListener('click', e => { const b = e.target.closest('[data-row-op]'); if (b) op(b.dataset.rowOp, [b.dataset.m]); });
+    document.getElementById('reload').addEventListener('click', load);
+    load();
+})();
+</script>
+{% endblock %}
