@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for('vault.index') }}">Secrets</a></li><li class="breadcrumb-item active">Browse</li>{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-xl-5">
+        <div class="card" id="list-card">
+            <div class="card-header flex-wrap">
+                <h4 class="card-title font-monospace fs-sm" id="crumbs"></h4>
+                <div class="card-actions">
+                    <select class="form-select form-select-sm w-auto" id="mount">{% for m in mounts %}<option value="{{ m.path }}" {% if m.path == mount %}selected{% endif %}>{{ m.path }}/ (kv{{ m.version }})</option>{% endfor %}</select>
+                    <button class="btn btn-sm btn-primary" id="new-secret"><i class="ti ti-plus"></i></button>
+                </div>
+            </div>
+            <div class="card-body p-0"><div class="file-list" id="list"></div></div>
+        </div>
+    </div>
+    <div class="col-xl-7">
+        <div class="card" id="secret-card" style="display:none">
+            <div class="card-header">
+                <h4 class="card-title font-monospace fs-sm"><i class="ti ti-key me-1 text-warning"></i><span id="secret-path"></span></h4>
+                <div class="card-actions">
+                    <select class="form-select form-select-sm w-auto" id="version"></select>
+                    <button class="btn btn-sm btn-soft-warning" id="reveal"><i class="ti ti-eye me-1"></i>Reveal</button>
+                    <button class="btn btn-sm btn-soft-danger" id="delete"><i class="ti ti-trash"></i></button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info fs-xs d-none" id="old-version">You are viewing an older version. <a href="#" class="alert-link" id="rollback">Restore it as the latest version</a>.</div>
+                <table class="table align-middle mb-3" id="kv"><thead><tr><th style="width:35%">Key</th><th>Value</th><th style="width:40px"></th></tr></thead><tbody></tbody></table>
+                <button class="btn btn-sm btn-light" id="add-row"><i class="ti ti-plus me-1"></i>Add key</button>
+                <button class="btn btn-sm btn-primary float-end" id="save"><i class="ti ti-device-floppy me-1"></i>Save new version</button>
+                <div class="text-muted fs-xs mt-3" id="meta"></div>
+            </div>
+        </div>
+        <div class="card" id="empty-card"><div class="card-body"><div class="empty-state"><i class="ti ti-lock-square"></i>Select a secret on the left, or create a new one.</div></div></div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const $ = id => document.getElementById(id);
+    let mount = {{ mount|tojson }}, path = {{ path|tojson }}, current = null, revealed = false, viewing = null;
+    const isDir = p => !p || p.endsWith('/');
+
+    function crumbs(dir) {
+        const parts = dir.split('/').filter(Boolean);
+        $('crumbs').innerHTML = `<a href="#" data-dir="">${SW.esc(mount)}/</a>` + parts.map((p, i) => `<a href="#" data-dir="${SW.esc(parts.slice(0, i + 1).join('/'))}/">${SW.esc(p)}/</a>`).join('');
+    }
+    async function listDir(dir) {
+        dir = dir.replace(/^\/+/, '');
+        crumbs(dir);
+        SW.loading($('list-card'), true);
+        try {
+            const items = await SW.api(`/api/vault/list?mount=${encodeURIComponent(mount)}&path=${encodeURIComponent(dir)}`);
+            $('list').innerHTML = (dir ? `<div class="fl-row"><i class="ti ti-arrow-back-up text-muted"></i><a class="fl-name" href="#" data-dir="${SW.esc(dir.split('/').filter(Boolean).slice(0, -1).join('/'))}${dir.split('/').filter(Boolean).length > 1 ? '/' : ''}">..</a></div>` : '')
+                + items.map(k => `<div class="fl-row"><i class="ti ti-${k.endsWith('/') ? 'folder-filled' : 'key text-warning'}"></i>
+                    <a class="fl-name font-monospace" href="#" ${k.endsWith('/') ? `data-dir="${SW.esc(dir + k)}"` : `data-secret="${SW.esc(dir + k)}"`}>${SW.esc(k)}</a></div>`).join('')
+                || '<div class="empty-state"><i class="ti ti-folder-open"></i>Empty</div>';
+            window._dir = dir;
+        } finally { SW.loading($('list-card'), false); }
+    }
+    function row(k = '', v = null) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><input class="form-control form-control-sm font-monospace k" value="${SW.esc(k)}"></td>
+            <td><input class="form-control form-control-sm font-monospace v" ${v === null ? 'placeholder="•••••••• (unchanged)"' : `value="${SW.esc(typeof v === 'string' ? v : JSON.stringify(v))}"`}></td>
+            <td><button class="btn btn-sm btn-light btn-icon del"><i class="ti ti-x"></i></button></td>`;
+        tr.querySelector('.del').addEventListener('click', () => tr.remove());
+        $('kv').querySelector('tbody').appendChild(tr);
+    }
+    async function openSecret(p, version, reveal) {
+        const s = await SW.api(`/api/vault/secret?mount=${encodeURIComponent(mount)}&path=${encodeURIComponent(p)}${version ? '&version=' + version : ''}${reveal ? '&reveal=1' : ''}`);
+        current = p; revealed = !!reveal; viewing = version || null;
+        $('secret-card').style.display = ''; $('empty-card').style.display = 'none';
+        $('secret-path').textContent = mount + '/' + p;
+        $('kv').querySelector('tbody').innerHTML = '';
+        Object.entries(s.data).sort().forEach(([k, v]) => row(k, reveal ? v : null));
+        const versions = s.versions ? Object.keys(s.versions).map(Number).sort((a, b) => b - a) : [];
+        $('version').innerHTML = versions.map(v => `<option value="${v}" ${(version ? v == version : v === s.metadata.version) ? 'selected' : ''}>v${v}${s.versions[v].deletion_time ? ' (deleted)' : ''}</option>`).join('');
+        $('version').style.display = versions.length ? '' : 'none';
+        $('old-version').classList.toggle('d-none', !version || version == versions[0]);
+        $('meta').textContent = s.metadata.created_time ? `version ${s.metadata.version} · created ${new Date(s.metadata.created_time).toLocaleString()}` : '';
+        history.replaceState(null, '', `?mount=${encodeURIComponent(mount)}&path=${encodeURIComponent(p)}`);
+    }
+    document.addEventListener('click', e => {
+        const d = e.target.closest('[data-dir]'), s = e.target.closest('[data-secret]');
+        if (d) { e.preventDefault(); listDir(d.dataset.dir); }
+        if (s) { e.preventDefault(); openSecret(s.dataset.secret); }
+    });
+    $('mount').addEventListener('change', () => { mount = $('mount').value; listDir(''); });
+    $('reveal').addEventListener('click', async () => {
+        if (await SW.confirm('Reveal secret values?', 'This is recorded in the audit log.', 'Reveal', 'btn-warning')) openSecret(current, viewing, true);
+    });
+    $('version').addEventListener('change', () => openSecret(current, $('version').value, revealed));
+    $('rollback').addEventListener('click', async e => {
+        e.preventDefault();
+        await SW.api('/api/vault/rollback', { body: { mount, path: current, version: viewing } });
+        SW.toast('Restored as new version'); openSecret(current);
+    });
+    $('add-row').addEventListener('click', () => row('', ''));
+    $('save').addEventListener('click', async () => {
+        const data = {};
+        document.querySelectorAll('#kv tbody tr').forEach(tr => {
+            const k = tr.querySelector('.k').value.trim();
+            const vi = tr.querySelector('.v');
+            if (k) data[k] = (!revealed && vi.value === '' && vi.placeholder) ? null : vi.value;
+        });
+        await SW.api('/api/vault/secret', { body: { mount, path: current, data, merge_existing: true } });
+        SW.toast('Secret saved (new version)'); openSecret(current, null, revealed);
+        listDir(window._dir || '');
+    });
+    $('delete').addEventListener('click', async () => {
+        if (!(await SW.confirm('Delete ' + current + '?', 'All versions and metadata will be destroyed.', 'Delete'))) return;
+        await SW.api(`/api/vault/secret?mount=${encodeURIComponent(mount)}&path=${encodeURIComponent(current)}`, { method: 'DELETE' });
+        $('secret-card').style.display = 'none'; $('empty-card').style.display = '';
+        listDir(window._dir || '');
+    });
+    $('new-secret').addEventListener('click', () => {
+        const p = prompt('Path of the new secret (relative to ' + mount + '/):', (window._dir || '') + 'new-secret');
+        if (!p) return;
+        current = p.replace(/^\/+/, ''); revealed = true; viewing = null;
+        $('secret-card').style.display = ''; $('empty-card').style.display = 'none';
+        $('secret-path').textContent = mount + '/' + current + ' (new)';
+        $('kv').querySelector('tbody').innerHTML = '';
+        $('version').style.display = 'none'; $('meta').textContent = '';
+        row('', '');
+    });
+    // initial
+    if (path && !isDir(path)) {
+        const parent = path.split('/').slice(0, -1).join('/');
+        listDir(parent ? parent + '/' : '');
+        openSecret(path).catch(() => listDir(path + '/'));
+    } else listDir(path ? path.replace(/\/?$/, '/') : '');
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header %}
+{% block breadcrumb %}<li class="breadcrumb-item">Pillar</li><li class="breadcrumb-item active">Secrets</li>{% endblock %}
+{% block content %}
+{% if error %}<div class="alert alert-danger"><i class="ti ti-alert-circle me-1"></i>{{ error }}</div>{% endif %}
+<div class="row row-cols-xl-4 row-cols-sm-2 row-cols-1">
+    <div class="col"><div class="card stat-card"><div class="card-body d-flex gap-3 align-items-center">
+        <div class="avatar-md"><span class="avatar-title rounded-circle {{ 'bg-primary-subtle text-primary' if not health.sealed and not health.error else 'bg-danger-subtle text-danger' }}"><i class="ti ti-{{ 'lock-open' if not health.sealed else 'lock' }}"></i></span></div>
+        <div><h5 class="mb-1">Server</h5><h3 class="mb-0 fs-xl">{{ 'unreachable' if health.error else 'sealed' if health.sealed else 'unsealed' }}</h3><span class="text-muted fs-xs">OpenBao {{ health.version }}</span></div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body d-flex gap-3 align-items-center">
+        <div class="avatar-md"><span class="avatar-title rounded-circle bg-secondary-subtle text-secondary"><i class="ti ti-folders"></i></span></div>
+        <div><h5 class="mb-1">Secret engines</h5><h3 class="mb-0">{{ (mounts or [])|length }}</h3><span class="text-muted fs-xs">KV mount for Salt: <code>{{ mount }}</code></span></div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body d-flex gap-3 align-items-center">
+        <div class="avatar-md"><span class="avatar-title rounded-circle bg-info-subtle text-info"><i class="ti ti-shield-lock"></i></span></div>
+        <div><h5 class="mb-1">ACL policies</h5><h3 class="mb-0">{{ (policies or [])|length }}</h3><span class="text-muted fs-xs">incl. <code>saltstack/*</code></span></div></div></div></div>
+    <div class="col"><div class="card stat-card"><div class="card-body d-flex gap-3 align-items-center">
+        <div class="avatar-md"><span class="avatar-title rounded-circle bg-warning-subtle text-warning"><i class="ti ti-key"></i></span></div>
+        <div><h5 class="mb-1">Conductor token</h5><h3 class="mb-0 fs-xl text-truncate" style="max-width:170px">{{ (token.policies or [])|join(', ') if token else '-' }}</h3>
+            <span class="text-muted fs-xs">{% if token and token.ttl %}expires in {{ (token.ttl / 3600)|round(1) }}h{% else %}no expiry{% endif %}</span></div></div></div></div>
+</div>
+
+<div class="row">
+    <div class="col-xl-7">
+        <div class="card">
+            {{ card_header('Salt integration - per-minion secrets', 'plug-connected', extra='<a class="btn btn-sm btn-soft-primary" href="' ~ url_for('vault.browse', mount=mount, path=prefix ~ '/') ~ '"><i class="ti ti-folder me-1"></i>Browse ' ~ mount ~ '/' ~ prefix ~ '</a>') }}
+            <div class="card-body">
+                <p class="text-muted fs-xs">The master's <code>vault</code> ext_pillar merges <code>{{ mount }}/{{ prefix }}/common</code> into every minion and
+                    <code>{{ mount }}/{{ prefix }}/minions/&lt;id&gt;</code> into each minion, under the <code>secrets</code> pillar key. It compiles pillar with a
+                    per-minion token carrying the <code>saltstack/minions</code> and <code>saltstack/&lt;id&gt;</code> policies.</p>
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="fw-semibold">Common secrets:</span>
+                    {% if common %}{% for k in common.data %}<span class="badge badge-soft-secondary">{{ k }}</span>{% endfor %}{% else %}<span class="text-muted">none</span>{% endif %}
+                    <a class="btn btn-sm btn-light ms-auto" href="{{ url_for('vault.browse', mount=mount, path=prefix ~ '/common') }}">Open</a>
+                </div>
+                <table class="table table-sm align-middle mb-2">
+                    <thead><tr><th style="width:30px"><input type="checkbox" class="form-check-input" data-check-all=".onb"></th><th>Minion</th><th>Secret path</th><th>Policy saltstack/<th>Policy <code>saltstack/&lt;id&gt;</code></th>lt;id<th>Policy <code>saltstack/&lt;id&gt;</code></th>gt;</th><th></th></tr></thead>
+                    <tbody>
+                    {% for c in coverage or [] %}
+                    <tr>
+                        <td><input type="checkbox" class="form-check-input onb" value="{{ c.id }}" {% if not (c.secret and c.policy) %}checked{% endif %}></td>
+                        <td class="fw-semibold">{{ c.id }}</td>
+                        <td>{% if c.secret %}<span class="badge badge-soft-primary"><i class="ti ti-check"></i> exists</span>{% else %}<span class="badge badge-soft-warning">missing</span>{% endif %}</td>
+                        <td>{% if c.policy %}<span class="badge badge-soft-primary"><i class="ti ti-check"></i> exists</span>{% else %}<span class="badge badge-soft-danger">missing - pillar secrets won't load</span>{% endif %}</td>
+                        <td class="text-end"><a class="btn btn-sm btn-light" href="{{ url_for('vault.browse', mount=mount, path=prefix ~ '/minions/' ~ c.id) }}"><i class="ti ti-pencil"></i></a></td>
+                    </tr>
+                    {% else %}<tr><td colspan="5" class="text-muted">No accepted minions.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+                <button class="btn btn-sm btn-primary" id="onboard"><i class="ti ti-user-plus me-1"></i>Create policy + secret path for selected minions</button>
+            </div>
+        </div>
+        <div class="card">
+            {{ card_header('Secret engines', 'folders') }}
+            <div class="table-responsive"><table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Path</th><th>Type</th><th>Version</th><th>Description</th><th></th></tr></thead>
+                <tbody>{% for m in mounts or [] %}<tr>
+                    <td class="font-monospace fw-semibold">{{ m.path }}/</td><td><span class="badge badge-soft-secondary">{{ m.type }}</span></td>
+                    <td>{{ 'v' ~ m.version if m.type == 'kv' else '' }}</td><td class="text-muted">{{ m.description }}</td>
+                    <td class="text-end">{% if m.type in ('kv', 'generic') %}<a class="btn btn-sm btn-light" href="{{ url_for('vault.browse', mount=m.path) }}">Browse</a>{% endif %}</td></tr>{% endfor %}</tbody>
+            </table></div>
+        </div>
+    </div>
+    <div class="col-xl-5">
+        <div class="card">
+            {{ card_header('ACL policies', 'shield-lock', extra='<button class="btn btn-sm btn-soft-primary" id="new-policy"><i class="ti ti-plus"></i></button>') }}
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush" style="max-height:520px;overflow:auto">
+                    {% for p in policies or [] %}
+                    <li class="list-group-item d-flex align-items-center px-3">
+                        <i class="ti ti-shield me-2 {{ 'text-primary' if p.startswith('saltstack/') else 'text-muted' }}"></i>
+                        <a href="#" class="font-monospace flex-grow-1" data-policy="{{ p }}">{{ p }}</a>
+                        {% if p not in ('root', 'default') %}<button class="btn btn-sm btn-light btn-icon" data-del-policy="{{ p }}"><i class="ti ti-trash"></i></button>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="policy-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Policy</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <label class="form-label">Name</label><input class="form-control font-monospace mb-3" id="p-name">
+        <label class="form-label">Rules (HCL)</label><textarea class="form-control font-monospace" id="p-rules" rows="14"></textarea>
+    </div>
+    <div class="modal-footer"><button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="p-save">Save policy</button></div>
+</div></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const pm = () => bootstrap.Modal.getOrCreateInstance('#policy-modal');
+    document.querySelectorAll('[data-policy]').forEach(a => a.addEventListener('click', async e => {
+        e.preventDefault();
+        const p = await SW.api('/api/vault/policy/' + a.dataset.policy);
+        document.getElementById('p-name').value = p.name;
+        document.getElementById('p-rules').value = p.rules || '';
+        pm().show();
+    }));
+    document.getElementById('new-policy').addEventListener('click', e => {
+        e.stopPropagation();
+        document.getElementById('p-name').value = '';
+        document.getElementById('p-rules').value = 'path "{{ mount }}/data/{{ prefix }}/*" {\n  capabilities = ["read"]\n}\n';
+        pm().show();
+    });
+    document.getElementById('p-save').addEventListener('click', async () => {
+        await SW.api('/api/vault/policy', { body: { name: document.getElementById('p-name').value, rules: document.getElementById('p-rules').value } });
+        SW.toast('Policy saved'); location.reload();
+    });
+    document.querySelectorAll('[data-del-policy]').forEach(b => b.addEventListener('click', async () => {
+        if (!(await SW.confirm('Delete policy ' + b.dataset.delPolicy + '?', '', 'Delete'))) return;
+        await SW.api('/api/vault/policy/' + b.dataset.delPolicy, { method: 'DELETE' });
+        location.reload();
+    }));
+    document.getElementById('onboard')?.addEventListener('click', async () => {
+        const minions = [...document.querySelectorAll('.onb:checked')].map(c => c.value);
+        if (!minions.length) return SW.toast('Select minions first', 'warning');
+        const r = await SW.api('/api/vault/onboard', { body: { minions } });
+        SW.toast('Onboarded: ' + r.done.join(', ')); location.reload();
+    });
+})();
+</script>
+{% endblock %}
