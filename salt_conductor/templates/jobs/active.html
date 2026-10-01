@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for('jobs.index') }}">Jobs</a></li><li class="breadcrumb-item active">Running</li>{% endblock %}
+{% block content %}
+<div class="card" id="active-card">
+    <div class="card-header"><h4 class="card-title">Jobs currently running on minions</h4>
+        <div class="card-actions">
+            <div class="form-check form-switch mb-0 me-2"><input class="form-check-input" type="checkbox" id="auto" checked><label class="form-check-label fs-xs" for="auto">Auto-refresh (5s)</label></div>
+            <button class="btn btn-sm btn-light" id="reload"><i class="ti ti-refresh"></i></button></div></div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Job ID</th><th>Function</th><th>Arguments</th><th>Target</th><th>User</th><th>Running on</th><th>Returned</th><th></th></tr></thead>
+            <tbody id="active-body"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const tb = document.getElementById('active-body');
+    function load() {
+        SW.loading(document.getElementById('active-card'), true);
+        SW.api('/api/jobs/active', { quiet: true }).then(jobs => {
+            const rows = Object.entries(jobs).sort((a, b) => b[0].localeCompare(a[0]));
+            tb.innerHTML = rows.map(([jid, j]) => `<tr>
+                <td><a class="font-monospace fw-semibold" href="/jobs/${jid}">${jid}</a><div class="text-muted fs-xxs">${SW.jidTime(jid)}</div></td>
+                <td><span class="badge badge-soft-dark font-monospace">${SW.esc(j.Function)}</span></td>
+                <td class="font-monospace fs-xs">${SW.esc(JSON.stringify(j.Arguments || []))}</td>
+                <td class="font-monospace">${SW.esc(j.Target)}</td><td>${SW.esc(j.User)}</td>
+                <td>${(j.Running || []).map(r => `<span class="badge badge-soft-warning me-1">${SW.esc(Object.keys(r)[0] || r)}</span>`).join('')}</td>
+                <td>${(j.Returned || []).length}</td>
+                <td class="table-actions"><button class="btn btn-sm btn-soft-danger" data-kill="${jid}" data-tgt="${SW.esc((j.Running || []).map(r => Object.keys(r)[0]).join(','))}"><i class="ti ti-skull"></i> Kill</button></td>
+            </tr>`).join('') || '<tr><td colspan="8"><div class="empty-state"><i class="ti ti-mood-happy"></i>No job is currently running.</div></td></tr>';
+        }).finally(() => SW.loading(document.getElementById('active-card'), false));
+    }
+    tb.addEventListener('click', async e => {
+        const b = e.target.closest('[data-kill]');
+        if (!b || !(await SW.confirm('Kill job ' + b.dataset.kill + '?', '', 'Kill'))) return;
+        await SW.api(`/api/jobs/${b.dataset.kill}/kill`, { body: { tgt: b.dataset.tgt || '*', tgt_type: b.dataset.tgt ? 'list' : 'glob' } });
+        SW.toast('Kill signal sent'); load();
+    });
+    document.getElementById('reload').addEventListener('click', load);
+    setInterval(() => { if (document.getElementById('auto').checked) load(); }, 5000);
+    load();
+})();
+</script>
+{% endblock %}

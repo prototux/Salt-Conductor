@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% from "macros.html" import pagination %}
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <form class="row g-2 align-items-end" method="get">
+            <div class="col-lg-2 col-md-4"><label class="form-label fs-xs">Function</label><input class="form-control form-control-sm font-monospace" name="fun" value="{{ filters.fun }}" placeholder="state.apply"></div>
+            <div class="col-lg-2 col-md-4"><label class="form-label fs-xs">Target</label><input class="form-control form-control-sm font-monospace" name="target" value="{{ filters.target }}" placeholder="web*"></div>
+            <div class="col-lg-2 col-md-4"><label class="form-label fs-xs">Minion returned</label><input class="form-control form-control-sm font-monospace" name="minion" value="{{ filters.minion }}" placeholder="web01"></div>
+            <div class="col-lg-2 col-md-4"><label class="form-label fs-xs">User</label><input class="form-control form-control-sm" name="user" value="{{ filters.user }}"></div>
+            <div class="col-lg-2 col-md-4"><label class="form-label fs-xs">Status</label>
+                <select class="form-select form-select-sm" name="status">
+                    <option value="">Any</option>
+                    {% for v, l in [('success', 'Succeeded'), ('failed', 'Has failures'), ('noreturn', 'No return')] %}<option value="{{ v }}" {% if filters.status == v %}selected{% endif %}>{{ l }}</option>{% endfor %}
+                </select></div>
+            <div class="col-lg-2 col-md-4 d-flex gap-1">
+                <button class="btn btn-sm btn-primary flex-grow-1"><i class="ti ti-filter me-1"></i>Filter</button>
+                <a class="btn btn-sm btn-light" href="{{ url_for('jobs.index') }}" title="Reset"><i class="ti ti-x"></i></a>
+            </div>
+            <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="internal" value="1" id="internal" {% if filters.show_internal %}checked{% endif %} onchange="this.form.submit()"><label class="form-check-label fs-xs" for="internal">Show internal jobs (find_job, vault token issuing, status polling…)</label></div></div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><h4 class="card-title">Jobs <span class="badge badge-soft-secondary ms-1">{{ total }}</span></h4>
+        <div class="card-actions"><a class="btn btn-sm btn-soft-primary" href="{{ url_for('jobs.active') }}"><i class="ti ti-loader me-1"></i>Running jobs</a></div></div>
+    <div class="table-responsive">
+        <table class="table table-hover table-nowrap align-middle mb-0">
+            <thead><tr><th>Job ID</th><th>Started</th><th>Function</th><th>Arguments</th><th>Target</th><th>User</th><th>Returns</th><th>Status</th><th></th></tr></thead>
+            <tbody>
+            {% for j in rows %}
+            <tr>
+                <td><a class="font-monospace fw-semibold" href="{{ url_for('jobs.detail', jid=j.jid) }}">{{ j.jid }}</a></td>
+                <td>{{ j.time|dt if j.time else '' }}<div class="text-muted fs-xxs">{{ j.time|timeago if j.time else '' }}</div></td>
+                <td><span class="badge badge-soft-dark font-monospace">{{ j.fun }}</span></td>
+                <td class="font-monospace fs-xs text-truncate" style="max-width:220px" title="{{ j.arg|tojson }}">{% if j.arg %}{% for a in j.arg %}{{ a if a is string else a|tojson }} {% endfor %}{% endif %}</td>
+                <td class="font-monospace text-truncate" style="max-width:180px">{{ j.tgt or "-" }}{% if j.tgt_type and j.tgt_type != 'glob' %} <span class="badge badge-soft-secondary">{{ j.tgt_type }}</span>{% endif %}</td>
+                <td>{{ j.user or '-' }}</td>
+                <td>{{ j.returned }}{% if j.targeted is not none %}<span class="text-muted">/{{ j.targeted }}</span>{% endif %}</td>
+                <td>{% if j.failed %}<span class="badge badge-soft-danger">{{ j.failed }} failed</span>
+                    {% elif j.returned %}<span class="badge badge-soft-primary">success</span>
+                    {% else %}<span class="badge badge-soft-warning">no return</span>{% endif %}</td>
+                <td class="table-actions">
+                    <a class="btn btn-sm btn-light" title="Re-run" href="{{ url_for('run.index', fun=j.fun, tgt=j.tgt, tgt_type=j.tgt_type or 'glob', args=(j.arg or [])|map('string')|join(' ')) }}"><i class="ti ti-repeat"></i></a>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="9"><div class="empty-state"><i class="ti ti-list-search"></i>No jobs match these filters.</div></td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-body pt-0">{{ pagination(page, total, per_page, 'jobs.index') }}</div>
+</div>
+{% endblock %}

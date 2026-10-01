@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for('jobs.index') }}">Jobs</a></li><li class="breadcrumb-item active">{{ jid }}</li>{% endblock %}
+{% block content %}
+{% set load = job.load %}
+<div class="row">
+    <div class="col-xl-4">
+        <div class="card">
+            {{ card_header('Job details', 'info-circle') }}
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-4 text-muted">Job ID</dt><dd class="col-8 font-monospace">{{ jid }}</dd>
+                    <dt class="col-4 text-muted">Started</dt><dd class="col-8">{{ jid|jid_time }}</dd>
+                    <dt class="col-4 text-muted">Function</dt><dd class="col-8"><span class="badge badge-soft-dark font-monospace">{{ load.fun }}</span></dd>
+                    <dt class="col-4 text-muted">Target</dt><dd class="col-8 font-monospace">{{ load.tgt }} {% if load.tgt_type %}<span class="badge badge-soft-secondary">{{ load.tgt_type }}</span>{% endif %}</dd>
+                    <dt class="col-4 text-muted">User</dt><dd class="col-8">{{ load.user or '-' }}</dd>
+                    <dt class="col-4 text-muted">Arguments</dt><dd class="col-8"><pre class="output p-2">{{ (load.arg or [])|tojson_pretty }}</pre></dd>
+                    <dt class="col-4 text-muted">Progress</dt>
+                    <dd class="col-8"><span id="progress-text"></span>
+                        <div class="progress mt-1" style="height:6px"><div class="progress-bar" id="progress-bar"></div></div></dd>
+                </dl>
+            </div>
+            <div class="card-footer d-flex gap-2 flex-wrap">
+                <a class="btn btn-sm btn-soft-primary" href="{{ url_for('run.index', fun=(load.fun or '').replace('runner.', ''), client='runner' if (load.fun or '').startswith('runner.') else 'local', tgt=load.tgt if load.tgt is string else '', tgt_type=load.tgt_type or 'glob', args=(load.arg or [])|map('string')|join(' ')) }}"><i class="ti ti-repeat me-1"></i>Re-run</a>
+                <button class="btn btn-sm btn-soft-danger" id="kill-btn"><i class="ti ti-skull me-1"></i>Kill job</button>
+                <button class="btn btn-sm btn-light" id="raw-btn"><i class="ti ti-code me-1"></i>Raw JSON</button>
+            </div>
+        </div>
+        <div class="card" id="missing-card" style="display:none">
+            {{ card_header('Waiting for', 'clock') }}
+            <div class="card-body" id="missing"></div>
+        </div>
+    </div>
+    <div class="col-xl-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="card-title">Returns <span class="badge badge-soft-secondary ms-1" id="ret-count">0</span></h4>
+                <div class="card-actions">
+                    <div class="form-check form-switch mb-0 me-2"><input class="form-check-input" type="checkbox" id="only-changes"><label class="form-check-label fs-xs" for="only-changes">Only changes/failures</label></div>
+                    <span class="badge badge-soft-info d-none" id="live-badge"><span class="spinner-grow spinner-grow-sm me-1" style="width:.5rem;height:.5rem"></span>live</span>
+                </div>
+            </div>
+            <div class="card-body" id="returns"></div>
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="raw-modal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Raw job data</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body"><pre class="output" id="raw"></pre></div></div></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    let job = {{ job|tojson }};
+    const JID = job.jid;
+    function render() {
+        const rets = {};
+        for (const [m, r] of Object.entries(job.returns)) rets[m] = { ret: r.ret, retcode: r.retcode ?? (r.success ? 0 : 1) };
+        const n = Object.keys(rets).length;
+        document.getElementById('ret-count').textContent = n;
+        const total = Array.isArray(job.targeted) ? job.targeted.length : n;
+        document.getElementById('progress-text').textContent = `${n} / ${total || n} minion(s) returned`;
+        document.getElementById('progress-bar').style.width = (total ? Math.round(n * 100 / total) : 100) + '%';
+        const fun = job.load.fun || '';
+        SW.renderResults(document.getElementById('returns'), rets, { fullReturn: true, stateFun: /state\./.test(fun), onlyChanges: document.getElementById('only-changes').checked });
+        const mc = document.getElementById('missing-card');
+        mc.style.display = job.missing.length ? '' : 'none';
+        document.getElementById('missing').innerHTML = job.missing.map(m => `<span class="badge badge-soft-warning me-1">${SW.esc(m)}</span>`).join('');
+        document.getElementById('raw').textContent = JSON.stringify(job, null, 2);
+    }
+    render();
+    document.getElementById('only-changes').addEventListener('change', render);
+    // poll while minions are missing and the job is recent
+    const ageMin = (Date.now() - new Date(job.started).getTime()) / 60000;
+    if ((job.missing.length || !Object.keys(job.returns).length) && ageMin < 30) {
+        const badge = document.getElementById('live-badge');
+        badge.classList.remove('d-none');
+        let tries = 0;
+        const timer = setInterval(async () => {
+            tries++;
+            try {
+                const j = await SW.api('/api/jobs/' + JID, { quiet: true });
+                const changed = Object.keys(j.returns).length !== Object.keys(job.returns).length;
+                job = j;
+                if (changed) render();
+                if ((!j.missing.length && Object.keys(j.returns).length) || tries > 200) { clearInterval(timer); badge.classList.add('d-none'); render(); }
+            } catch (e) { /* keep polling */ }
+        }, 3000);
+    }
+    document.getElementById('kill-btn').addEventListener('click', async () => {
+        if (!(await SW.confirm('Kill job ' + JID + '?', 'Sends saltutil.kill_job to the targeted minions.', 'Kill'))) return;
+        const res = await SW.api(`/api/jobs/${JID}/kill`, { body: { tgt: job.load.tgt || '*', tgt_type: job.load.tgt_type || 'glob' } });
+        SW.toast('Kill sent: ' + JSON.stringify(res.result));
+    });
+    document.getElementById('raw-btn').addEventListener('click', () => bootstrap.Modal.getOrCreateInstance('#raw-modal').show());
+})();
+</script>
+{% endblock %}
