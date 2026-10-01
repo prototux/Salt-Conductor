@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item">Pillar</li><li class="breadcrumb-item active">Database</li>{% endblock %}
+{% block content %}
+<div class="row">
+    <div class="col-xxl-9 col-xl-12">
+        <div class="card" id="db-card">
+            <div class="card-header flex-wrap">
+                <h4 class="card-title">Pillar entries <span class="badge badge-soft-secondary ms-1" id="count">…</span></h4>
+                <div class="card-actions flex-wrap gap-1">
+                    <input class="form-control form-control-sm" style="width:200px" placeholder="Filter…" id="filter">
+                    <button class="btn btn-sm btn-primary" id="new-btn"><i class="ti ti-plus me-1"></i>New entry</button>
+                    <a class="btn btn-sm btn-light" href="/api/pillar/db/export" title="Export YAML"><i class="ti ti-download"></i></a>
+                    <button class="btn btn-sm btn-light" data-bs-toggle="modal" data-bs-target="#import-modal" title="Import YAML"><i class="ti ti-upload"></i></button>
+                    <button class="btn btn-sm btn-soft-secondary" id="refresh-all" title="saltutil.refresh_pillar on all minions"><i class="ti ti-refresh me-1"></i>Push to minions</button>
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="db-table">
+                    <thead><tr><th>Key</th><th>Target</th><th>Value</th><th>Prio</th><th>Enabled</th><th>Updated</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-xxl-3 col-xl-12">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-info-circle me-1 text-muted"></i>How it works</h4></div>
+            <div class="card-body fs-xs">
+                <p>Entries are stored in the <code>conductor_pillar</code> PostgreSQL table and served to minions by the <code>conductor_db</code> ext_pillar on the master.</p>
+                <ul class="ps-3">
+                    <li><b>Key</b> uses <code>:</code> to nest: <code>app:db:host</code> &rarr; <code>{app: {db: {host: …}}}</code>.</li>
+                    <li><b>Target</b> supports the same matchers as top files (glob, list, grain, pillar, compound, nodegroup…).</li>
+                    <li>Matching entries are merged in ascending <b>priority</b> - higher wins.</li>
+                    <li>Database pillar is merged <b>after</b> git pillar, so it overrides it; OpenBao secrets live under <code>secrets:</code>.</li>
+                    <li>Minions see changes after a pillar refresh (<i>Push to minions</i>).</li>
+                    <li>Every change is versioned: open an entry's history to restore it.</li>
+                </ul>
+                <p class="mb-0"><i class="ti ti-lock text-warning"></i> <b>Sensitive</b> entries are masked in the UI; prefer OpenBao for real secrets.</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="edit-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="edit-title">New pillar entry</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <input type="hidden" id="f-id">
+        <div class="row g-3">
+            <div class="col-md-8"><label class="form-label">Key</label><input class="form-control font-monospace" id="f-key" placeholder="nginx:worker_processes"></div>
+            <div class="col-md-4"><label class="form-label">Priority</label><input type="number" class="form-control" id="f-priority" value="100"></div>
+            <div class="col-md-12">
+                <label class="form-label d-flex">Target <a href="#" class="ms-auto fs-xs fw-normal" id="f-preview-btn"><i class="ti ti-eye"></i> preview matches</a></label>
+                <div class="input-group">
+                    <select class="form-select flex-grow-0 w-auto" id="f-tgt_type">{% for v, l in target_types %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</select>
+                    <input class="form-control font-monospace" id="f-target" value="*" list="minion-ids">
+                </div>
+                <div id="f-preview" class="fs-xs mt-1"></div>
+            </div>
+            <div class="col-md-12"><label class="form-label">Value <span class="text-muted fw-normal fs-xs">(YAML or JSON: <code>42</code>, <code>"text"</code>, <code>[a, b]</code>, <code>{k: v}</code>)</span></label>
+                <textarea class="form-control font-monospace" id="f-value" rows="6"></textarea></div>
+            <div class="col-md-12"><label class="form-label">Description</label><input class="form-control" id="f-description"></div>
+            <div class="col-md-6"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="f-enabled" checked><label class="form-check-label" for="f-enabled">Enabled</label></div></div>
+            <div class="col-md-6"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" id="f-sensitive"><label class="form-check-label" for="f-sensitive">Sensitive (masked in UI)</label></div></div>
+        </div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="save-btn"><i class="ti ti-device-floppy me-1"></i>Save</button></div>
+</div></div></div>
+
+<div class="modal fade" id="history-modal" tabindex="-1"><div class="modal-dialog modal-xl modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">History</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body" id="history-body"></div></div></div></div>
+
+<div class="modal fade" id="import-modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">Import entries (YAML)</h5><button class="btn-close" data-bs-dismiss="modal"></button></div>
+    <div class="modal-body">
+        <textarea class="form-control font-monospace" id="import-yaml" rows="12" placeholder="- target: '*'&#10;  tgt_type: glob&#10;  key: motd:banner&#10;  value: Hello&#10;  priority: 10"></textarea>
+        <div class="form-check mt-2"><input class="form-check-input" type="checkbox" id="import-replace"><label class="form-check-label text-danger" for="import-replace">Replace all existing entries</label></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-light" data-bs-dismiss="modal">Cancel</button><button class="btn btn-primary" id="import-btn">Import</button></div>
+</div></div></div>
+<datalist id="minion-ids">{% for m in minions %}<option value="{{ m }}">{% endfor %}</datalist>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    let rows = [];
+    const $ = id => document.getElementById(id);
+    const tbody = document.querySelector('#db-table tbody');
+    const toYaml = v => typeof v === 'string' ? (/^[\w .\-\/@]+$/.test(v) && !/^(true|false|yes|no|null|~|\d+(\.\d+)?)$/i.test(v) ? v : JSON.stringify(v)) : JSON.stringify(v, null, 2);
+    function render() {
+        const q = $('filter').value.toLowerCase();
+        const list = rows.filter(r => !q || JSON.stringify(r).toLowerCase().includes(q));
+        $('count').textContent = rows.length;
+        tbody.innerHTML = list.map(r => `<tr class="${r.enabled ? '' : 'opacity-50'}">
+            <td><span class="font-monospace fw-semibold">${SW.esc(r.key)}</span>${r.sensitive ? ' <i class="ti ti-lock text-warning" title="sensitive"></i>' : ''}
+                <div class="text-muted fs-xxs">${SW.esc(r.description)}</div></td>
+            <td><span class="badge badge-soft-secondary me-1">${SW.esc(r.tgt_type)}</span><span class="font-monospace">${SW.esc(r.target)}</span>
+                <a href="#" class="fs-xxs ms-1" data-matches="${r.id}">matches?</a><div class="fs-xxs" id="m-${r.id}"></div></td>
+            <td class="font-monospace fs-xs text-truncate" style="max-width:220px">${r.value === '**********' ? '<span class="value-mask" data-reveal="' + r.id + '">secret-value</span>' : SW.esc(JSON.stringify(r.value))}</td>
+            <td>${r.priority}</td>
+            <td><div class="form-check form-switch mb-0"><input class="form-check-input" type="checkbox" data-toggle-id="${r.id}" ${r.enabled ? 'checked' : ''}></div></td>
+            <td class="fs-xs">${SW.esc(r.updated_by)}<div class="text-muted fs-xxs">${SW.timeago(r.updated_at)}</div></td>
+            <td class="table-actions"><div class="btn-group btn-group-sm">
+                <button class="btn btn-light" data-edit="${r.id}" title="Edit"><i class="ti ti-pencil"></i></button>
+                <button class="btn btn-light" data-history="${r.id}" title="History"><i class="ti ti-history"></i></button>
+                <button class="btn btn-light text-danger" data-delete="${r.id}" title="Delete"><i class="ti ti-trash"></i></button>
+            </div></td></tr>`).join('') || '<tr><td colspan="7"><div class="empty-state"><i class="ti ti-database-off"></i>No entries</div></td></tr>';
+    }
+    function load() {
+        SW.loading($('db-card'), true);
+        SW.api('/api/pillar/db').then(d => { rows = d; render(); }).finally(() => SW.loading($('db-card'), false));
+    }
+    $('filter').addEventListener('input', render);
+
+    const modal = () => bootstrap.Modal.getOrCreateInstance('#edit-modal');
+    function openForm(r) {
+        $('edit-title').textContent = r ? 'Edit ' + r.key : 'New pillar entry';
+        $('f-id').value = r?.id || '';
+        $('f-key').value = r?.key || '';
+        $('f-priority').value = r?.priority ?? 100;
+        $('f-tgt_type').value = r?.tgt_type || 'glob';
+        $('f-target').value = r?.target ?? '*';
+        $('f-value').value = r ? (r.value === '**********' ? '**********' : toYaml(r.value)) : '';
+        $('f-description').value = r?.description || '';
+        $('f-enabled').checked = r ? r.enabled : true;
+        $('f-sensitive').checked = r ? r.sensitive : false;
+        $('f-preview').innerHTML = '';
+        modal().show();
+    }
+    $('new-btn').addEventListener('click', () => openForm(null));
+    $('save-btn').addEventListener('click', async () => {
+        const id = $('f-id').value;
+        const body = { key: $('f-key').value, priority: $('f-priority').value, tgt_type: $('f-tgt_type').value, target: $('f-target').value,
+            value: $('f-value').value, description: $('f-description').value, enabled: $('f-enabled').checked, sensitive: $('f-sensitive').checked };
+        await SW.api('/api/pillar/db' + (id ? '/' + id : ''), { method: id ? 'PUT' : 'POST', body });
+        modal().hide();
+        SW.toast('Saved - use "Push to minions" to refresh their pillar');
+        load();
+    });
+    async function preview(target, tgt_type, box) {
+        box.innerHTML = '<span class="spinner-border spinner-border-sm text-primary"></span>';
+        try {
+            const list = await SW.api('/api/pillar/db/matches', { body: { target, tgt_type } });
+            box.innerHTML = list.length ? list.map(m => `<span class="badge badge-soft-primary me-1">${SW.esc(m)}</span>`).join('') : '<span class="text-muted">no responding minion</span>';
+        } catch (e) { box.innerHTML = ''; }
+    }
+    $('f-preview-btn').addEventListener('click', e => { e.preventDefault(); preview($('f-target').value, $('f-tgt_type').value, $('f-preview')); });
+
+    tbody.addEventListener('click', async e => {
+        const t = e.target.closest('[data-edit],[data-delete],[data-history],[data-matches],[data-reveal]');
+        if (!t) return;
+        e.preventDefault();
+        if (t.dataset.edit) {
+            const r = rows.find(x => x.id == t.dataset.edit);
+            openForm(r);
+        } else if (t.dataset.delete) {
+            const r = rows.find(x => x.id == t.dataset.delete);
+            if (!(await SW.confirm('Delete ' + r.key + '?', `Target ${r.target}. It can be restored from its history.`, 'Delete'))) return;
+            await SW.api('/api/pillar/db/' + r.id, { method: 'DELETE' });
+            load();
+        } else if (t.dataset.matches) {
+            const r = rows.find(x => x.id == t.dataset.matches);
+            preview(r.target, r.tgt_type, $('m-' + r.id));
+        } else if (t.dataset.reveal) {
+            const r = await SW.api(`/api/pillar/db/${t.dataset.reveal}?reveal=1`);
+            t.classList.remove('value-mask');
+            t.textContent = JSON.stringify(r.value);
+        } else if (t.dataset.history) {
+            const hist = await SW.api(`/api/pillar/db/${t.dataset.history}/history`);
+            $('history-body').innerHTML = hist.map(h => `<div class="timeline-item">
+                <span class="tl-dot ${h.action === 'delete' ? 'danger' : 'info'}"></span>
+                <div class="d-flex"><span class="fw-semibold">${SW.esc(h.action)}</span><span class="ms-2 text-muted fs-xs">${SW.esc(h.changed_by)} &middot; ${SW.timeago(h.changed_at)}</span>
+                ${h.before ? `<button class="btn btn-sm btn-soft-warning ms-auto" data-restore="${h.id}" data-pid="${h.pillar_id}"><i class="ti ti-arrow-back-up"></i> restore previous</button>` : ''}</div>
+                <div class="row g-2 mt-1">${h.before ? `<div class="col-md-6"><div class="fs-xxs text-muted">before</div><pre class="output">${SW.esc(JSON.stringify(h.before, null, 2))}</pre></div>` : ''}
+                ${h.after ? `<div class="col-md-6"><div class="fs-xxs text-muted">after</div><pre class="output">${SW.esc(JSON.stringify(h.after, null, 2))}</pre></div>` : ''}</div></div>`).join('') || '<div class="text-muted">No history</div>';
+            bootstrap.Modal.getOrCreateInstance('#history-modal').show();
+        }
+    });
+    $('history-body').addEventListener('click', async e => {
+        const b = e.target.closest('[data-restore]');
+        if (!b || !(await SW.confirm('Restore this version?', '', 'Restore', 'btn-warning'))) return;
+        await SW.api(`/api/pillar/db/${b.dataset.pid}/restore/${b.dataset.restore}`, { body: {} });
+        bootstrap.Modal.getInstance('#history-modal').hide();
+        SW.toast('Restored'); load();
+    });
+    tbody.addEventListener('change', async e => {
+        const t = e.target.closest('[data-toggle-id]');
+        if (!t) return;
+        await SW.api(`/api/pillar/db/${t.dataset.toggleId}/toggle`, { body: {} });
+        load();
+    });
+    $('refresh-all').addEventListener('click', async () => {
+        const r = await SW.api('/api/pillar/db/refresh', { body: { target: '*' } });
+        SW.toast(`Pillar refresh sent to ${r.minions.length} minion(s)`);
+    });
+    $('import-btn').addEventListener('click', async () => {
+        const r = await SW.api('/api/pillar/db/import', { body: { yaml: $('import-yaml').value, replace: $('import-replace').checked } });
+        bootstrap.Modal.getInstance('#import-modal').hide();
+        SW.toast(`${r.imported} entries imported`); load();
+    });
+    load();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item">Pillar</li><li class="breadcrumb-item active">Viewer</li>{% endblock %}
+{% block content %}
+<div class="card">
+    <div class="card-body d-flex gap-2 align-items-end flex-wrap">
+        <div><label class="form-label">Minion</label>
+            <select class="form-select" id="minion" style="min-width:240px">{% for m in minions %}<option {% if m == minion %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+        <button class="btn btn-primary" id="load"><i class="ti ti-eye me-1"></i>Show pillar</button>
+        <button class="btn btn-soft-warning" id="load-unmask"><i class="ti ti-eye-off me-1"></i>Show unmasked</button>
+        <span class="text-muted fs-xs ms-2">Merged pillar with the contribution of each source.</span>
+    </div>
+</div>
+<div class="row" id="result" style="display:none">
+    <div class="col-xl-6">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-stack-2 me-1 text-muted"></i>Merged pillar</h4>
+                <div class="card-actions"><input class="form-control form-control-sm" placeholder="filter keys…" id="pfilter" style="width:180px"></div></div>
+            <div class="card-body" id="merged"></div>
+        </div>
+    </div>
+    <div class="col-xl-6">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-database me-1 text-muted"></i>Database pillar entries</h4><div class="card-actions"><a class="btn btn-sm btn-light" href="{{ url_for('pillar_db.index') }}">Manage</a></div></div>
+            <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Key</th><th>Target</th><th>Prio</th><th>Applies</th></tr></thead><tbody id="dbrows"></tbody></table></div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-lock-password me-1 text-muted"></i>OpenBao paths (<code>secrets:</code>)</h4><div class="card-actions"><a class="btn btn-sm btn-light" href="{{ url_for('vault.index') }}">Manage</a></div></div>
+            <div class="card-body" id="vault"></div>
+        </div>
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-brand-git me-1 text-muted"></i>Git pillar <code>top.sls</code></h4><div class="card-actions"><a class="btn btn-sm btn-light" href="{{ url_for('pillar.edit', path='top.sls') }}">Edit</a></div></div>
+            <div class="card-body"><pre class="output" id="gittop"></pre></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    let merged = null;
+    async function load(unmask) {
+        const m = document.getElementById('minion').value;
+        if (!m) return;
+        if (unmask && !(await SW.confirm('Reveal pillar values?', 'Secrets will be shown in clear text; this is audited.', 'Reveal', 'btn-warning'))) return;
+        history.replaceState(null, '', '?minion=' + encodeURIComponent(m));
+        const card = document.getElementById('result');
+        card.style.display = '';
+        SW.loading(card, true);
+        try {
+            const d = await SW.api(`/api/pillar/sources/${encodeURIComponent(m)}${unmask ? '?unmask=1' : ''}`);
+            merged = d.merged;
+            renderMerged();
+            document.getElementById('dbrows').innerHTML = d.db.map(r => `<tr class="${r.matched && r.enabled ? '' : 'opacity-50'}">
+                <td class="font-monospace">${SW.esc(r.key)}</td><td><span class="badge badge-soft-secondary me-1">${SW.esc(r.tgt_type)}</span><span class="font-monospace">${SW.esc(r.target)}</span></td>
+                <td>${r.priority}</td><td>${!r.enabled ? '<span class="badge badge-soft-dark">disabled</span>' : r.matched ? '<span class="badge badge-soft-primary"><i class="ti ti-check"></i> yes</span>' : r.matched === null ? '<span class="badge badge-soft-warning">unknown</span>' : '<span class="badge badge-soft-dark">no</span>'}</td></tr>`).join('')
+                || '<tr><td colspan="4" class="text-muted">No entries</td></tr>';
+            document.getElementById('vault').innerHTML = d.vault.map(v => `<div class="d-flex align-items-center gap-2 mb-2">
+                <i class="ti ti-${v.exists ? 'circle-check text-primary' : 'circle-dashed text-muted'}"></i>
+                <a class="font-monospace" href="/vault/browse?path=${encodeURIComponent(v.path.split('/').slice(1).join('/'))}&mount=${encodeURIComponent(v.path.split('/')[0])}">${SW.esc(v.path)}</a>
+                <span class="ms-auto">${(v.keys || []).map(k => `<span class="badge badge-soft-secondary me-1">${SW.esc(k)}</span>`).join('') || (v.error ? `<span class="text-danger fs-xs">${SW.esc(v.error)}</span>` : '<span class="text-muted fs-xs">not created</span>')}</span></div>`).join('')
+                || '<span class="text-muted">OpenBao not configured</span>';
+            document.getElementById('gittop').textContent = d.git_top || '(no top.sls)';
+        } finally { SW.loading(card, false); }
+    }
+    function renderMerged() {
+        const q = document.getElementById('pfilter').value.toLowerCase();
+        const data = q && merged && typeof merged === 'object' ? Object.fromEntries(Object.entries(merged).filter(([k, v]) => k.toLowerCase().includes(q) || JSON.stringify(v).toLowerCase().includes(q))) : merged;
+        const box = document.getElementById('merged');
+        box.innerHTML = '';
+        box.appendChild(SW.jsonTree(data, { open: 2 }));
+    }
+    document.getElementById('pfilter').addEventListener('input', SW.debounce(renderMerged, 150));
+    document.getElementById('load').addEventListener('click', () => load(false));
+    document.getElementById('load-unmask').addEventListener('click', () => load(true));
+    {% if minion %}load(false);{% endif %}
+})();
+</script>
+{% endblock %}
