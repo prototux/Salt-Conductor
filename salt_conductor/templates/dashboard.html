@@ -1,0 +1,270 @@
+{% extends "base.html" %}
+{% from "macros.html" import card_header %}
+{% block content %}
+
+<!-- KPI tiles -->
+<div class="row row-cols-xxl-5 row-cols-md-3 row-cols-sm-2 row-cols-1">
+    <div class="col">
+        <div class="card stat-card"><div class="card-body">
+            <a href="{{ url_for('minions.index') }}" class="text-muted float-end mt-n1 fs-xl"><i class="ti ti-external-link"></i></a>
+            <h5>Minions</h5>
+            <div class="d-flex align-items-center gap-2 my-3">
+                <div class="avatar-md flex-shrink-0"><span class="avatar-title text-bg-light rounded-circle"><i class="ti ti-server-2"></i></span></div>
+                <h3 class="mb-0"><span id="kpi-up">–</span><span class="text-muted fs-lg fw-normal"> / <span id="kpi-total">–</span></span></h3>
+                <span class="badge badge-soft-danger fw-medium ms-auto fs-xs d-none" id="kpi-down-badge"></span>
+            </div>
+            <p class="mb-0"><span class="text-primary"><i class="ti ti-point-filled"></i></span>
+                <span class="text-muted">Responding to ping</span><span class="float-end"><b id="kpi-accepted">–</b> keys</span></p>
+        </div></div>
+    </div>
+    <div class="col">
+        <div class="card stat-card"><div class="card-body">
+            <a href="{{ url_for('keys.index') }}" class="text-muted float-end mt-n1 fs-xl"><i class="ti ti-external-link"></i></a>
+            <h5>Pending keys</h5>
+            <div class="d-flex align-items-center gap-2 my-3">
+                <div class="avatar-md flex-shrink-0"><span class="avatar-title text-bg-light rounded-circle"><i class="ti ti-key"></i></span></div>
+                <h3 class="mb-0" id="kpi-pending">{{ nav.pending_keys }}</h3>
+                {% if nav.pending_keys %}<span class="badge badge-soft-warning fw-medium ms-auto fs-xs">Action needed</span>{% endif %}
+            </div>
+            <p class="mb-0"><span class="text-warning"><i class="ti ti-point-filled"></i></span>
+                <span class="text-muted">Rejected / denied</span><span class="float-end"><b id="kpi-rejected">–</b></span></p>
+        </div></div>
+    </div>
+    <div class="col">
+        <div class="card stat-card"><div class="card-body">
+            <a href="{{ url_for('jobs.index') }}" class="text-muted float-end mt-n1 fs-xl"><i class="ti ti-external-link"></i></a>
+            <h5>Jobs (24h)</h5>
+            <div class="d-flex align-items-center gap-2 my-3">
+                <div class="avatar-md flex-shrink-0"><span class="avatar-title text-bg-light rounded-circle"><i class="ti ti-list-details"></i></span></div>
+                <h3 class="mb-0">{{ stats.jobs_24h or 0 }}</h3>
+                {% if stats.failed_24h %}<span class="badge badge-soft-danger fw-medium ms-auto fs-xs">{{ stats.failed_24h }} failed</span>
+                {% else %}<span class="badge badge-soft-primary fw-medium ms-auto fs-xs">0 failed</span>{% endif %}
+            </div>
+            <p class="mb-0"><span class="text-secondary"><i class="ti ti-point-filled"></i></span>
+                <span class="text-muted">Minion returns</span><span class="float-end"><b>{{ stats.returns_24h or 0 }}</b></span></p>
+        </div></div>
+    </div>
+    <div class="col">
+        <div class="card stat-card"><div class="card-body">
+            <a href="{{ url_for('compliance.index') }}" class="text-muted float-end mt-n1 fs-xl"><i class="ti ti-external-link"></i></a>
+            <h5>Compliance</h5>
+            <div class="d-flex align-items-center gap-2 my-3">
+                <div class="avatar-md flex-shrink-0"><span class="avatar-title text-bg-light rounded-circle"><i class="ti ti-shield-check"></i></span></div>
+                <h3 class="mb-0"><span id="kpi-compliance">–</span>%</h3>
+                <span class="badge badge-soft-warning fw-medium ms-auto fs-xs d-none" id="kpi-drift-badge"></span>
+            </div>
+            <p class="mb-0"><span class="text-primary"><i class="ti ti-point-filled"></i></span>
+                <span class="text-muted">Last state run clean</span><span class="float-end"><b id="kpi-compliant">–</b> minions</span></p>
+        </div></div>
+    </div>
+    <div class="col">
+        <div class="card stat-card"><div class="card-body">
+            <a href="{{ url_for('events.index') }}" class="text-muted float-end mt-n1 fs-xl"><i class="ti ti-external-link"></i></a>
+            <h5>Events (1h)</h5>
+            <div class="d-flex align-items-center gap-2 my-3">
+                <div class="avatar-md flex-shrink-0"><span class="avatar-title text-bg-light rounded-circle"><i class="ti ti-activity"></i></span></div>
+                <h3 class="mb-0">{{ stats.events_1h or 0 }}</h3>
+                <span class="badge badge-soft-info fw-medium ms-auto fs-xs">live</span>
+            </div>
+            <p class="mb-0"><span class="text-info"><i class="ti ti-point-filled"></i></span>
+                <span class="text-muted">DB pillar entries</span><span class="float-end"><b>{{ stats.db_pillar_entries or 0 }}</b></span></p>
+        </div></div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-xxl-8">
+        <div class="card">
+            {{ card_header('Job activity - last 24 hours', 'chart-bar') }}
+            <div class="card-body">
+                <div class="d-flex gap-3 mb-3 flex-wrap">
+                    <div class="bg-light bg-opacity-50 px-3 py-2 rounded"><span class="text-muted">Returns:</span> <b>{{ stats.returns_24h or 0 }}</b></div>
+                    <div class="bg-light bg-opacity-50 px-3 py-2 rounded"><span class="text-muted">Failed:</span> <b class="text-danger">{{ stats.failed_24h or 0 }}</b></div>
+                    <div class="bg-light bg-opacity-50 px-3 py-2 rounded"><span class="text-muted">Success rate:</span>
+                        <b>{% if stats.returns_24h %}{{ ((stats.returns_24h - stats.failed_24h) * 100 / stats.returns_24h)|round(1) }}{% else %}100{% endif %}%</b></div>
+                </div>
+                <div class="chart-box"><canvas id="activity-chart" role="img" aria-label="Job returns per hour"></canvas></div>
+            </div>
+        </div>
+    </div>
+    <div class="col-xxl-4">
+        <div class="card" id="compliance-card">
+            {{ card_header('State compliance', 'shield-check') }}
+            <div class="card-body">
+                <p class="text-muted fs-xs mb-3">Result of the most recent <code>state.apply</code> / <code>state.test</code> (top file) per minion.</p>
+                <div class="chart-box sm"><canvas id="compliance-chart" role="img" aria-label="Compliance breakdown"></canvas></div>
+                <table class="table table-sm mb-0 mt-3" id="compliance-table"><tbody></tbody></table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-xl-8">
+        <div class="card">
+            {{ card_header('Recent jobs', 'list-details', extra='<a href="' ~ url_for('jobs.index') ~ '" class="btn btn-sm btn-light">View all</a>') }}
+            <div class="table-responsive">
+                <table class="table table-hover table-nowrap align-middle mb-0">
+                    <thead><tr><th>Job</th><th>Function</th><th>Target</th><th>User</th><th>Returns</th><th>Status</th></tr></thead>
+                    <tbody>
+                    {% for j in recent_jobs %}
+                        <tr>
+                            <td><a href="{{ url_for('jobs.detail', jid=j.jid) }}" class="font-monospace">{{ j.jid }}</a><div class="text-muted fs-xs">{{ j.jid|jid_time }}</div></td>
+                            <td><span class="badge badge-soft-dark font-monospace">{{ j.fun }}</span></td>
+                            <td class="font-monospace text-truncate" style="max-width:200px">{{ j.tgt or "-" }}</td>
+                            <td>{{ j.user }}</td>
+                            <td>{{ j.returned }}</td>
+                            <td>{% if j.failed %}<span class="badge badge-soft-danger"><i class="ti ti-x"></i> {{ j.failed }} failed</span>
+                                {% elif j.returned %}<span class="badge badge-soft-primary"><i class="ti ti-check"></i> success</span>
+                                {% else %}<span class="badge badge-soft-warning">no return</span>{% endif %}</td>
+                        </tr>
+                    {% else %}
+                        <tr><td colspan="6"><div class="empty-state"><i class="ti ti-list-details"></i>No jobs recorded yet</div></td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-4">
+        <div class="card" id="os-card">
+            {{ card_header('Operating systems', 'devices-pc') }}
+            <div class="card-body">
+                <div class="chart-box sm"><canvas id="os-chart" role="img" aria-label="Minions per operating system"></canvas></div>
+                <h6 class="mt-3 mb-2 text-muted text-uppercase fs-xxs fw-bold">Salt versions</h6>
+                <div id="versions" class="d-flex flex-wrap gap-1"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-xl-4">
+        <div class="card" id="status-card">
+            {{ card_header('Minion status', 'heartbeat', extra='<button class="card-action-item" id="status-refresh" title="Refresh"><i class="ti ti-refresh"></i></button>') }}
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush" id="status-list" style="max-height:330px;overflow:auto"></ul>
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-4">
+        <div class="card">
+            {{ card_header('Top functions - 7 days', 'bolt') }}
+            <div class="card-body">
+                {% if top_funcs %}
+                <div class="chart-box sm"><canvas id="funcs-chart" role="img" aria-label="Most executed functions"></canvas></div>
+                {% else %}<div class="empty-state"><i class="ti ti-bolt"></i>Nothing executed yet</div>{% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-xl-4">
+        <div class="card">
+            {{ card_header('Recent activity', 'history', extra='<a href="' ~ url_for('audit.index') ~ '" class="btn btn-sm btn-light">Audit log</a>') }}
+            <div class="card-body">
+                {% for a in audit_rows %}
+                <div class="timeline-item">
+                    <span class="tl-dot {{ '' if a.success else 'danger' }}"></span>
+                    <div class="d-flex justify-content-between"><span class="fw-semibold">{{ a.action }}</span><span class="text-muted fs-xs">{{ a.ts|timeago }}</span></div>
+                    <div class="text-muted fs-xs text-truncate">{{ a.username }}{% if a.target %} &rarr; <span class="font-monospace">{{ a.target }}</span>{% endif %}</div>
+                </div>
+                {% else %}<div class="empty-state"><i class="ti ti-history"></i>No activity yet</div>{% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='vendor/chartjs/chart.umd.js') }}"></script>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+(function () {
+    // --- activity: stacked bars per hour, reserved status colours + legend
+    SW.api('/api/dashboard/activity', { quiet: true }).then(rows => {
+        const hours = [];
+        const now = new Date(); now.setMinutes(0, 0, 0);
+        for (let i = 23; i >= 0; i--) hours.push(new Date(now.getTime() - i * 3600e3));
+        const map = Object.fromEntries(rows.map(r => [new Date(r.hour).getTime(), r]));
+        const ok = hours.map(h => map[h.getTime()]?.ok || 0);
+        const failed = hours.map(h => map[h.getTime()]?.failed || 0);
+        SW.makeChart(document.getElementById('activity-chart'), {
+            type: 'bar',
+            data: {
+                labels: hours.map(h => h.getHours().toString().padStart(2, '0') + ':00'),
+                datasets: [
+                    { label: 'Succeeded', data: ok, backgroundColor: SW.status.ok, borderColor: SW.ink().surface, borderWidth: { top: 2 }, _surfaceBorder: true, maxBarThickness: 22 },
+                    { label: 'Failed', data: failed, backgroundColor: SW.status.failed, borderColor: SW.ink().surface, borderWidth: { top: 2 }, _surfaceBorder: true, maxBarThickness: 22 },
+                ],
+            },
+            options: {
+                interaction: { mode: 'index', intersect: false },
+                plugins: { legend: { position: 'top', align: 'end' } },
+                scales: {
+                    x: { stacked: true, grid: { display: false } },
+                    y: { stacked: true, beginAtZero: true, ticks: { precision: 0 }, grid: { color: SW.ink().grid } },
+                },
+            },
+        });
+    });
+
+    // --- salt-dependent summary
+    function loadSummary() {
+        const cards = ['#compliance-card', '#os-card', '#status-card'].map(s => document.querySelector(s));
+        cards.forEach(c => SW.loading(c, true));
+        return SW.api('/api/dashboard/summary', { quiet: true }).then(d => {
+            const up = d.status.up.length, total = d.keys.accepted;
+            document.getElementById('kpi-up').textContent = up;
+            document.getElementById('kpi-total').textContent = total;
+            document.getElementById('kpi-accepted').textContent = total;
+            document.getElementById('kpi-rejected').textContent = d.keys.rejected + d.keys.denied;
+            const down = d.status.down.length;
+            const db = document.getElementById('kpi-down-badge');
+            if (down) { db.textContent = down + ' down'; db.classList.remove('d-none'); }
+
+            const c = d.compliance;
+            const pct = total ? Math.round(c.compliant * 100 / total) : 100;
+            document.getElementById('kpi-compliance').textContent = pct;
+            document.getElementById('kpi-compliant').textContent = c.compliant;
+            const drift = c.drift + c.failed;
+            const b = document.getElementById('kpi-drift-badge');
+            if (drift) { b.textContent = drift + ' need attention'; b.classList.remove('d-none'); }
+
+            const labels = [['compliant', 'Compliant', SW.status.ok, 'circle-check'], ['drift', 'Drift (test)', SW.status.drift, 'clock'],
+                            ['failed', 'Failed', SW.status.failed, 'circle-x'], ['never', 'Never applied', SW.status.never, 'help-circle']];
+            if (!window._complianceChart) {
+                window._complianceChart = SW.makeChart(document.getElementById('compliance-chart'), {
+                    type: 'doughnut',
+                    data: { labels: labels.map(l => l[1]),
+                            datasets: [{ data: labels.map(l => c[l[0]]), backgroundColor: labels.map(l => l[2]), borderColor: SW.ink().surface, borderWidth: 2, _surfaceBorder: true }] },
+                    options: { cutout: '72%', plugins: { legend: { display: false } } },
+                });
+            }
+            document.querySelector('#compliance-table tbody').innerHTML = labels.map(l =>
+                `<tr><td><i class="ti ti-${l[3]} me-1" style="color:${l[2]}"></i>${l[1]}</td><td class="text-end fw-semibold">${c[l[0]]}</td></tr>`).join('');
+
+            if (!window._osChart) {
+                const os = d.os.slice(0, 6);
+                if (d.os.length > 6) os.push(['Other', d.os.slice(6).reduce((a, x) => a + x[1], 0)]);
+                window._osChart = SW.hbar(document.getElementById('os-chart'), os, { label: 'Minions' });
+            }
+            document.getElementById('versions').innerHTML = d.versions.map(v =>
+                `<span class="badge badge-soft-secondary fs-xs">${SW.esc(v[0])} <span class="text-muted">&times;${v[1]}</span></span>`).join('') || '<span class="text-muted">-</span>';
+
+            const list = document.getElementById('status-list');
+            const rows = d.status.up.map(m => [m, 'up']).concat(d.status.down.map(m => [m, 'down']));
+            list.innerHTML = rows.map(([m, s]) => `<li class="list-group-item d-flex align-items-center gap-2 px-3">
+                <span class="status-dot ${s}"></span><a href="/minions/${encodeURIComponent(m)}" class="fw-semibold">${SW.esc(m)}</a>
+                <span class="ms-auto badge ${s === 'up' ? 'badge-soft-primary' : 'badge-soft-danger'}">${s === 'up' ? 'responding' : 'not responding'}</span></li>`).join('')
+                || '<li class="list-group-item"><div class="empty-state"><i class="ti ti-server-off"></i>No accepted minions</div></li>';
+        }).finally(() => cards.forEach(c => SW.loading(c, false)));
+    }
+    loadSummary();
+    document.getElementById('status-refresh').addEventListener('click', e => { e.stopPropagation(); loadSummary(); });
+
+    {% if top_funcs %}
+    SW.hbar(document.getElementById('funcs-chart'), {{ top_funcs|map(attribute='fun')|list|tojson }}.map((f, i) => [f, {{ top_funcs|map(attribute='n')|list|tojson }}[i]]),
+        { label: 'Returns', color: SW.palette()[0], onClick: (e, els, chart) => { if (els.length) location = '/jobs?fun=' + encodeURIComponent(chart.data.labels[els[0].index]); } });
+    {% endif %}
+})();
+</script>
+{% endblock %}
