@@ -1,0 +1,58 @@
+# Salt Conductor - production deployment.
+#
+#   cp .env.example .env    # then edit it
+#   docker compose up -d
+#
+# Salt Conductor needs a salt-master with salt-api and a PostgreSQL database that the master
+# also uses as its job cache (see README.md). If you don't have one yet, the bundled
+# PostgreSQL can be started with:  docker compose --profile postgres up -d
+
+services:
+  conductor:
+    image: ghcr.io/prototux/salt-conductor:${CONDUCTOR_VERSION:-latest}
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # publish on localhost and put a TLS reverse proxy in front (set CONDUCTOR_PROXY_FIX=1)
+      - "${CONDUCTOR_LISTEN:-127.0.0.1:8080}:8080"
+    volumes:
+      - conductor-data:/data
+      # deploy key + known_hosts for SSH git remotes:
+      # - ./ssh:/home/conductor/.ssh:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-salt}
+      POSTGRES_USER: ${POSTGRES_USER:-salt}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    ports:
+      # the salt-master writes its job cache here (pgjsonb returner)
+      - "${POSTGRES_LISTEN:-127.0.0.1:5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./salt_conductor/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+
+volumes:
+  conductor-data:
+  pgdata:
