@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "macros.html" import pagination %}
+{% block content %}
+<div class="card">
+    <div class="card-body">
+        <form class="row g-2 align-items-end" method="get">
+            <div class="col-md-2"><label class="form-label fs-xs">User</label><select class="form-select form-select-sm" name="user"><option value="">Anyone</option>{% for u in users %}<option {% if u == f.user %}selected{% endif %}>{{ u }}</option>{% endfor %}</select></div>
+            <div class="col-md-2"><label class="form-label fs-xs">Action</label><input class="form-control form-control-sm" name="action" value="{{ f.action }}" list="actions"><datalist id="actions">{% for a in actions %}<option value="{{ a }}">{% endfor %}</datalist></div>
+            <div class="col-md-3"><label class="form-label fs-xs">Target</label><input class="form-control form-control-sm" name="target" value="{{ f.target }}"></div>
+            <div class="col-md-2"><label class="form-label fs-xs">Since</label><input type="date" class="form-control form-control-sm" name="since" value="{{ f.since }}"></div>
+            <div class="col-md-1"><div class="form-check mb-1"><input class="form-check-input" type="checkbox" name="failed" value="1" id="failed" {% if f.failed %}checked{% endif %}><label class="form-check-label fs-xs" for="failed">Failed</label></div></div>
+            <div class="col-md-2 d-flex gap-1"><button class="btn btn-sm btn-primary flex-grow-1"><i class="ti ti-filter me-1"></i>Filter</button><a class="btn btn-sm btn-light" href="{{ url_for('audit.index') }}"><i class="ti ti-x"></i></a></div>
+        </form>
+    </div>
+</div>
+<div class="card">
+    <div class="card-header"><h4 class="card-title">Audit trail <span class="badge badge-soft-secondary ms-1">{{ total }}</span></h4></div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>When</th><th>User</th><th>Action</th><th>Target</th><th>Details</th><th>IP</th><th></th></tr></thead>
+            <tbody>
+            {% for r in rows %}
+            <tr>
+                <td class="text-nowrap">{{ r.ts|dt }}<div class="text-muted fs-xxs">{{ r.ts|timeago }}</div></td>
+                <td><span class="avatar-initials rounded-circle me-1" style="width:24px;height:24px;font-size:9px">{{ r.username[:2]|upper }}</span>{{ r.username }}</td>
+                <td><span class="badge badge-soft-{{ 'danger' if not r.success else 'secondary' }} font-monospace">{{ r.action }}</span></td>
+                <td class="font-monospace fs-xs text-truncate" style="max-width:260px">{{ r.target }}</td>
+                <td>{% if r.details %}<a href="#" class="fs-xs" data-bs-toggle="collapse" data-bs-target="#d{{ r.id }}">details</a>
+                    <div class="collapse" id="d{{ r.id }}"><pre class="output mt-1" style="max-width:480px">{{ r.details|tojson_pretty }}</pre></div>{% endif %}</td>
+                <td class="text-muted fs-xs">{{ r.ip }}</td>
+                <td>{% if r.details.jid %}<a class="btn btn-sm btn-light" href="{{ url_for('jobs.detail', jid=r.details.jid) }}" title="Open job"><i class="ti ti-external-link"></i></a>{% endif %}</td>
+            </tr>
+            {% else %}<tr><td colspan="7"><div class="empty-state"><i class="ti ti-history-off"></i>No audit entries</div></td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-body pt-0">{{ pagination(page, total, per_page, 'audit.index') }}</div>
+</div>
+{% endblock %}
