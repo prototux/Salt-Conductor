@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en" data-menu-color="dark" data-topbar-color="light" data-bs-theme="light" data-sidenav-size="default">
+<head>
+    <meta charset="utf-8">
+    <title>{% block title %}{{ page_title|default('Dashboard') }}{% endblock %} | {{ site_name }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <script>
+        (function () {
+            try {
+                var c = JSON.parse(localStorage.getItem('conductor.layout') || '{}');
+                var h = document.documentElement;
+                if (c.theme) h.setAttribute('data-bs-theme', c.theme);
+                if (c.menu) h.setAttribute('data-menu-color', c.menu);
+                if (c.topbar) h.setAttribute('data-topbar-color', c.topbar);
+                if (c.size && window.innerWidth > 1140) h.setAttribute('data-sidenav-size', c.size);
+                if (window.innerWidth <= 767) h.setAttribute('data-sidenav-size', 'offcanvas');
+            } catch (e) {}
+        })();
+    </script>
+    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='vendor/tabler/tabler-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+    {% block head %}{% endblock %}
+</head>
+<body>
+{% set uname = g.user.username if g.user else 'guest' %}
+<div class="wrapper">
+
+    <!-- ========== Topbar ========== -->
+    <header class="app-topbar">
+        <div class="topbar-menu">
+            <div class="d-flex align-items-center gap-2">
+                <a href="{{ url_for('dashboard.index') }}" class="logo-topbar">
+                    <span class="brand-mark"><i class="ti ti-salt"></i></span>
+                </a>
+                <button class="sidenav-toggle-button btn btn-default btn-icon" type="button" title="Toggle menu">
+                    <i class="ti ti-menu-4"></i>
+                </button>
+                <form class="app-search d-none d-lg-flex" action="{{ url_for('system.search') }}" method="get">
+                    <input type="search" class="form-control topbar-search" name="q" value="{{ request.args.get('q', '') if request.endpoint == 'system.search' else '' }}"
+                           placeholder="Search minions, jobs, files, pillar keys..." autocomplete="off">
+                    <i class="ti ti-search app-search-icon text-muted"></i>
+                </form>
+            </div>
+
+            <div class="d-flex align-items-center gap-1">
+                <div class="topbar-item d-none d-md-flex">
+                    <a href="{{ url_for('run.index') }}" class="btn btn-sm btn-primary rounded-pill me-2">
+                        <i class="ti ti-player-play me-1"></i> Run command
+                    </a>
+                </div>
+
+                <div class="topbar-item">
+                    <a class="topbar-link" href="{{ url_for('keys.index') }}" title="Pending keys">
+                        <i class="ti ti-key fs-xxl"></i>
+                        {% if nav.pending_keys %}<span class="badge text-bg-warning badge-circle topbar-badge">{{ nav.pending_keys }}</span>{% endif %}
+                    </a>
+                </div>
+
+                <div class="topbar-item">
+                    <div class="dropdown">
+                        <button class="topbar-link dropdown-toggle drop-arrow-none" data-bs-toggle="dropdown" data-bs-offset="0,22" type="button" title="Failed jobs (24h)">
+                            <i class="ti ti-bell fs-xxl"></i>
+                            {% if nav.failed_jobs %}<span class="badge text-bg-danger badge-circle topbar-badge">{{ nav.failed_jobs }}</span>{% endif %}
+                        </button>
+                        <div class="dropdown-menu dropdown-menu-end dropdown-menu-lg p-0">
+                            <div class="px-3 py-2 border-bottom border-dashed d-flex justify-content-between align-items-center">
+                                <h6 class="m-0 fs-md fw-semibold">Failures (last 24h)</h6>
+                                <span class="badge badge-soft-danger">{{ nav.failed_jobs }}</span>
+                            </div>
+                            <div class="noti-list">
+                                {% for f in nav.failed_list %}
+                                <a href="{{ url_for('jobs.detail', jid=f.jid) }}" class="dropdown-item notification-item py-2">
+                                    <span class="avatar-sm flex-shrink-0"><span class="avatar-title bg-danger-subtle text-danger rounded-circle"><i class="ti ti-alert-triangle"></i></span></span>
+                                    <span class="flex-grow-1 text-truncate">
+                                        <span class="fw-semibold d-block text-truncate">{{ f.fun }}</span>
+                                        <small class="text-muted">{{ f.id }} &middot; {{ f.alter_time|timeago }}</small>
+                                    </span>
+                                </a>
+                                {% else %}
+                                <div class="text-center text-muted py-4"><i class="ti ti-circle-check fs-24 text-primary d-block mb-1"></i>No failures, all good!</div>
+                                {% endfor %}
+                            </div>
+                            <a href="{{ url_for('jobs.index', status='failed') }}" class="dropdown-item text-center text-reset text-decoration-underline link-offset-2 fw-bold border-top border-light py-2">View all failed jobs</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="topbar-item d-none d-sm-flex">
+                    <button class="topbar-link" id="theme-toggle" type="button" title="Light / dark mode">
+                        <i class="ti ti-moon fs-xxl theme-icon-dark"></i><i class="ti ti-sun fs-xxl theme-icon-light"></i>
+                    </button>
+                </div>
+
+                <div class="topbar-item d-none d-md-flex">
+                    <button class="topbar-link" type="button" data-toggle="fullscreen" title="Fullscreen">
+                        <i class="ti ti-maximize fs-xxl"></i>
+                    </button>
+                </div>
+
+                <div class="topbar-item nav-user">
+                    <div class="dropdown">
+                        <a class="topbar-link dropdown-toggle drop-arrow-none px-2" data-bs-toggle="dropdown" data-bs-offset="0,19" href="#">
+                            <span class="avatar-initials rounded-circle me-lg-2">{{ uname[:2]|upper }}</span>
+                            <div class="d-lg-flex align-items-center gap-1 d-none">
+                                <span class="fw-semibold">{{ uname }}</span>
+                                <i class="ti ti-chevron-down align-middle"></i>
+                            </div>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-end">
+                            <div class="dropdown-header noti-title"><h6 class="text-overflow m-0">Welcome back!</h6></div>
+                            <span class="dropdown-item-text text-muted fs-xs">eauth: {{ g.user.eauth }}</span>
+                            <a href="{{ url_for('audit.index', user=uname) }}" class="dropdown-item"><i class="ti ti-history me-1 fs-lg align-middle"></i> My activity</a>
+                            <a href="{{ url_for('system.index') }}" class="dropdown-item"><i class="ti ti-heartbeat me-1 fs-lg align-middle"></i> System status</a>
+                            <div class="dropdown-divider"></div>
+                            <form action="{{ url_for('auth.logout') }}" method="post" class="m-0">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button class="dropdown-item text-danger fw-semibold"><i class="ti ti-logout me-1 fs-lg align-middle"></i> Log Out</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ========== Sidenav ========== -->
+    {% set ep = request.endpoint or '' %}
+    {% macro navlink(endpoint, icon, label, active_prefix=None, badge=None, badge_cls='danger') -%}
+        {% set ep = request.endpoint or '' %}{% set is_active = ep == endpoint or (active_prefix and ep.startswith(active_prefix)) %}
+        <li class="side-nav-item{% if is_active %} active{% endif %}">
+            <a href="{{ url_for(endpoint, **kwargs) }}" class="side-nav-link{% if is_active %} active{% endif %}">
+                {% if icon %}<span class="menu-icon"><i class="ti ti-{{ icon }}"></i></span>{% endif %}
+                <span class="menu-text">{{ label }}</span>
+                {% if badge %}<span class="badge text-bg-{{ badge_cls }}">{{ badge }}</span>{% endif %}
+            </a>
+        </li>
+    {%- endmacro %}
+    {% macro navgroup(id, icon, label, prefixes) -%}
+        {% set ep = request.endpoint or '' %}{% set open = [] %}{% for p in prefixes %}{% if ep.startswith(p) %}{% set _ = open.append(1) %}{% endif %}{% endfor %}
+        <li class="side-nav-item{% if open %} active{% endif %}">
+            <a data-bs-toggle="collapse" href="#nav-{{ id }}" aria-expanded="{{ 'true' if open else 'false' }}" class="side-nav-link{% if not open %} collapsed{% endif %}">
+                <span class="menu-icon"><i class="ti ti-{{ icon }}"></i></span>
+                <span class="menu-text">{{ label }}</span>
+                <span class="menu-arrow"></span>
+            </a>
+            <div class="collapse{% if open %} show{% endif %}" id="nav-{{ id }}">
+                <ul class="sub-menu">{{ caller() }}</ul>
+            </div>
+        </li>
+    {%- endmacro %}
+
+    <div class="sidenav-menu">
+        <a href="{{ url_for('dashboard.index') }}" class="logo">
+            <span class="logo-lg"><span class="brand-mark"><i class="ti ti-salt"></i></span><span class="brand-text">{{ short_name }}</span></span>
+            <span class="logo-sm"><span class="brand-mark"><i class="ti ti-salt"></i></span></span>
+        </a>
+        <button class="button-close-offcanvas" type="button"><i class="ti ti-x align-middle"></i></button>
+
+        <div class="sidenav-scroll">
+            <div class="sidenav-user">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <span class="avatar-initials avatar-md rounded-circle mb-2">{{ uname[:2]|upper }}</span>
+                        <span class="sidenav-user-name fw-bold d-block">{{ uname }}</span>
+                        <span class="fs-12 fw-semibold">{{ 'Administrator' if g.user.is_admin else 'Operator' }}</span>
+                    </div>
+                    <div class="dropdown">
+                        <a class="dropdown-toggle drop-arrow-none link-reset sidenav-user-set-icon" data-bs-toggle="dropdown" data-bs-offset="0,12" href="#">
+                            <i class="ti ti-settings fs-24 align-middle ms-1"></i>
+                        </a>
+                        <div class="dropdown-menu">
+                            <div class="dropdown-header noti-title"><h6 class="text-overflow m-0">Layout</h6></div>
+                            <a href="#" class="dropdown-item" data-layout="menu" data-value="dark"><i class="ti ti-layout-sidebar me-1"></i> Dark menu</a>
+                            <a href="#" class="dropdown-item" data-layout="menu" data-value="light"><i class="ti ti-layout-sidebar me-1"></i> Light menu</a>
+                            <a href="#" class="dropdown-item" data-layout="menu" data-value="gradient"><i class="ti ti-layout-sidebar me-1"></i> Gradient menu</a>
+                            <div class="dropdown-divider"></div>
+                            <a href="#" class="dropdown-item" data-layout="topbar" data-value="light"><i class="ti ti-layout-navbar me-1"></i> Light topbar</a>
+                            <a href="#" class="dropdown-item" data-layout="topbar" data-value="dark"><i class="ti ti-layout-navbar me-1"></i> Dark topbar</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <ul class="side-nav">
+                <li class="side-nav-title">Main</li>
+                {{ navlink('dashboard.index', 'dashboard', 'Dashboard') }}
+                {{ navlink('minions.index', 'server-2', 'Minions', 'minions.') }}
+                {{ navlink('keys.index', 'key', 'Keys', 'keys.', badge=nav.pending_keys or None, badge_cls='warning') }}
+
+                <li class="side-nav-title">Execution</li>
+                {{ navlink('run.index', 'player-play', 'Run command') }}
+                {{ navlink('run.shell', 'terminal-2', 'Remote shell') }}
+                {% call navgroup('jobs', 'list-details', 'Jobs', ['jobs.']) %}
+                    {{ navlink('jobs.index', None, 'Job history') }}
+                    {{ navlink('jobs.active', None, 'Running jobs') }}
+                {% endcall %}
+                {{ navlink('schedules.index', 'calendar-time', 'Schedules', 'schedules.') }}
+                {{ navlink('compliance.orchestrate', 'route', 'Orchestration') }}
+
+                <li class="side-nav-title">Configuration</li>
+                {% call navgroup('states', 'brand-git', 'States', ['states.']) %}
+                    {{ navlink('states.browse', None, 'Files', 'states.browse') }}
+                    {{ navlink('states.changes', None, 'Changes') }}
+                    {{ navlink('states.history', None, 'History', 'states.commit') }}
+                    {{ navlink('states.topfile', None, 'Top file') }}
+                {% endcall %}
+                {% call navgroup('pillar', 'database', 'Pillar', ['pillar.', 'pillar_db.', 'vault.']) %}
+                    {{ navlink('pillar.browse', None, 'Git pillar', 'pillar.browse') }}
+                    {{ navlink('pillar.changes', None, 'Git changes') }}
+                    {{ navlink('pillar.history', None, 'Git history', 'pillar.commit') }}
+                    {{ navlink('pillar_db.index', None, 'Database pillar') }}
+                    {% if g.user and g.user.is_admin %}{{ navlink('vault.index', None, 'Secrets (OpenBao)', 'vault.') }}{% endif %}
+                    {{ navlink('pillar_db.viewer', None, 'Pillar viewer') }}
+                {% endcall %}
+                {{ navlink('compliance.index', 'shield-check', 'Compliance') }}
+
+                <li class="side-nav-title">Monitoring</li>
+                {{ navlink('events.index', 'activity', 'Event bus') }}
+                {{ navlink('grains.index', 'chart-pie', 'Grains explorer') }}
+                {{ navlink('audit.index', 'history', 'Audit log') }}
+
+                <li class="side-nav-title">System</li>
+                {{ navlink('run.docs', 'book', 'Documentation') }}
+                {{ navlink('system.index', 'heartbeat', 'System status') }}
+            </ul>
+        </div>
+    </div>
+
+    <!-- ========== Content ========== -->
+    <div class="content-page">
+        <div class="container-fluid">
+            <div class="page-title-head d-flex align-items-center">
+                <div class="flex-grow-1 d-flex align-items-center gap-2">
+                    <h4 class="page-main-title m-0">{% block page_title %}{{ page_title|default('Dashboard') }}{% endblock %}</h4>
+                    {% block page_title_extra %}{% endblock %}
+                </div>
+                <div class="text-end">
+                    <ol class="breadcrumb m-0 py-0">
+                        <li class="breadcrumb-item"><a href="{{ url_for('dashboard.index') }}">Salt</a></li>
+                        {% block breadcrumb %}<li class="breadcrumb-item active">{{ page_title|default('Dashboard') }}</li>{% endblock %}
+                    </ol>
+                </div>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for cat, msg in messages %}
+                <div class="alert alert-{{ 'danger' if cat == 'error' else cat if cat != 'message' else 'info' }} alert-dismissible fade show" role="alert">
+                    {{ msg }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                </div>
+                {% endfor %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </div>
+
+        <footer class="footer">
+            <div class="container-fluid">
+                <div class="row">
+                    <div class="col-md-6 text-center text-md-start">
+                        &copy; {{ now.year }} <span class="fw-semibold">{{ site_name }}</span> &middot; SaltStack infrastructure console
+                    </div>
+                    <div class="col-md-6">
+                        <div class="text-md-end d-none d-md-block text-muted">
+                            salt-api <span class="fw-semibold">{{ config.SALT_API_URL }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+</div>
+
+<!-- Toasts & confirm dialog -->
+<div class="toast-container position-fixed top-0 end-0 p-3" id="toasts"></div>
+<div class="modal fade" id="confirm-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-body text-center p-4">
+                <div class="avatar-lg mx-auto mb-3"><span class="avatar-title bg-warning-subtle text-warning rounded-circle fs-36"><i class="ti ti-alert-triangle"></i></span></div>
+                <h4 class="mb-2" id="confirm-title">Are you sure?</h4>
+                <p class="text-muted mb-4" id="confirm-body"></p>
+                <button type="button" class="btn btn-light me-1" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-ok">Confirm</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='vendor/bootstrap/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

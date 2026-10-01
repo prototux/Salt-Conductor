@@ -1,0 +1,49 @@
+{% macro card_header(title, icon=None, collapse=True, extra=None) -%}
+<div class="card-header">
+    <h4 class="card-title">{% if icon %}<i class="ti ti-{{ icon }} me-1 text-muted"></i>{% endif %}{{ title }}</h4>
+    <div class="card-actions">
+        {% if extra %}{{ extra|safe }}{% endif %}
+        {% if collapse %}<button type="button" class="card-action-item" data-action="collapse" title="Collapse"><i class="ti ti-chevron-up"></i></button>{% endif %}
+    </div>
+</div>
+{%- endmacro %}
+
+{% macro pagination(page, total, per_page, endpoint) -%}
+{% set pages = ((total + per_page - 1) // per_page) %}
+{% if pages > 1 %}
+<nav class="d-flex justify-content-between align-items-center mt-3">
+    <span class="text-muted fs-xs">Showing {{ (page - 1) * per_page + 1 }}-{{ [page * per_page, total]|min }} of {{ total }}</span>
+    <ul class="pagination pagination-sm mb-0">
+        {% set args = request.args.to_dict() %}
+        <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+            {% set _ = args.update({'page': page - 1}) %}<a class="page-link" href="{{ url_for(endpoint, **args) }}"><i class="ti ti-chevron-left"></i></a>
+        </li>
+        {% for p in range([1, page - 3]|max, [pages, page + 3]|min + 1) %}
+            {% set _ = args.update({'page': p}) %}
+            <li class="page-item {% if p == page %}active{% endif %}"><a class="page-link" href="{{ url_for(endpoint, **args) }}">{{ p }}</a></li>
+        {% endfor %}
+        <li class="page-item {% if page >= pages %}disabled{% endif %}">
+            {% set _ = args.update({'page': page + 1}) %}<a class="page-link" href="{{ url_for(endpoint, **args) }}"><i class="ti ti-chevron-right"></i></a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro target_fields(tgt='*', tgt_type='glob', target_types=[], size='', id_prefix='') -%}
+<div class="input-group {% if size %}input-group-{{ size }}{% endif %}">
+    <select class="form-select flex-grow-0 w-auto" name="tgt_type" id="{{ id_prefix }}tgt_type" style="min-width:120px">
+        {% for value, label in target_types %}<option value="{{ value }}" {% if value == tgt_type %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <input type="text" class="form-control font-monospace" name="tgt" id="{{ id_prefix }}tgt" value="{{ tgt }}" placeholder="*" list="minion-ids">
+</div>
+{%- endmacro %}
+
+{% macro state_badge(s) -%}
+{% if not s %}<span class="badge badge-soft-dark">never</span>
+{% elif s.failed %}<span class="badge badge-soft-danger">{{ s.failed }} failed</span>
+{% elif s.pending %}<span class="badge badge-soft-warning">{{ s.pending }} drift</span>
+{% elif s.changed and s.test %}<span class="badge badge-soft-secondary">{{ s.changed }} changed</span>
+{% elif s.changed %}<span class="badge badge-soft-primary">compliant</span> <span class="badge badge-soft-secondary">{{ s.changed }} applied</span>
+{% else %}<span class="badge badge-soft-primary">compliant</span>{% endif %}
+{%- endmacro %}

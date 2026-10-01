@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en" data-bs-theme="light">
+<head>
+    <meta charset="utf-8">
+    <title>Log in | {{ site_name }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <script>try { var c = JSON.parse(localStorage.getItem('conductor.layout') || '{}'); if (c.theme) document.documentElement.setAttribute('data-bs-theme', c.theme); } catch (e) {}</script>
+    <link href="{{ url_for('static', filename='vendor/bootstrap/bootstrap.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='vendor/tabler/tabler-icons.min.css') }}" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/app.css') }}" rel="stylesheet">
+</head>
+<body>
+<div class="auth-bg">
+    <div class="auth-box">
+        <div class="auth-brand">
+            <span class="brand-mark"><i class="ti ti-salt"></i></span>
+            <span class="brand-text">{{ site_name }}</span>
+        </div>
+        <div class="card p-2">
+            <div class="card-body">
+                <h4 class="mb-1">Welcome back</h4>
+                <p class="text-muted mb-4">Sign in with your Salt <code>external_auth</code> credentials.</p>
+                {% with messages = get_flashed_messages(with_categories=true) %}{% for cat, msg in messages %}
+                    <div class="alert alert-{{ 'info' if cat == 'message' else cat }}">{{ msg }}</div>
+                {% endfor %}{% endwith %}
+                {% if error %}<div class="alert alert-danger"><i class="ti ti-alert-circle me-1"></i>{{ error }}</div>{% endif %}
+                <form method="post">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="mb-3">
+                        <label class="form-label" for="username">Username</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="ti ti-user"></i></span>
+                            <input class="form-control" id="username" name="username" value="{{ username }}" required autofocus autocomplete="username">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="password">Password</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="ti ti-lock"></i></span>
+                            <input class="form-control" id="password" name="password" type="password" required autocomplete="current-password">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label" for="eauth">Authentication backend</label>
+                        <select class="form-select" id="eauth" name="eauth">
+                            {% for b in backends %}<option value="{{ b }}" {% if b == eauth %}selected{% endif %}>{{ b }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <button class="btn btn-primary w-100 py-2 fw-semibold" type="submit"><i class="ti ti-login me-1"></i> Sign in</button>
+                </form>
+            </div>
+        </div>
+        <p class="text-center text-muted fs-xs mt-3">&copy; {{ now.year }} {{ site_name }} &middot; SaltStack infrastructure console</p>
+    </div>
+</div>
+<script>
+(function () {
+    // remember the last authentication backend used on this browser
+    const sel = document.getElementById('eauth');
+    try {
+        const last = localStorage.getItem('conductor.eauth');
+        if (last && !{{ (request.method == 'POST')|tojson }} && [...sel.options].some(o => o.value === last)) sel.value = last;
+        sel.form.addEventListener('submit', () => localStorage.setItem('conductor.eauth', sel.value));
+    } catch (e) { /* storage unavailable */ }
+})();
+</script>
+</body>
+</html>
