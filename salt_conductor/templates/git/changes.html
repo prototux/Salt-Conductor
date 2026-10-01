@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for(kind ~ '.browse') }}">{{ title }}</a></li><li class="breadcrumb-item active">Changes</li>{% endblock %}
+{% block content %}
+{% include "git/_toolbar.html" %}
+<div class="row">
+    <div class="col-xl-4">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title">Uncommitted changes <span class="badge badge-soft-warning ms-1">{{ changes|length }}</span></h4>
+                {% if changes %}<div class="card-actions"><button class="btn btn-sm btn-soft-danger" id="discard-all"><i class="ti ti-arrow-back-up me-1"></i>Discard all</button></div>{% endif %}</div>
+            <div class="card-body p-0">
+                <ul class="list-group list-group-flush">
+                    {% for c in changes %}
+                    <li class="list-group-item d-flex align-items-center gap-2 px-3">
+                        <input class="form-check-input change-check" type="checkbox" value="{{ c.path }}" checked>
+                        <span class="badge badge-soft-{{ {'A': 'primary', 'M': 'warning', 'D': 'danger'}.get(c.status, 'secondary') }}" style="width:22px">{{ c.status }}</span>
+                        <a class="font-monospace text-truncate flex-grow-1" href="{{ url_for(kind ~ '.edit', path=c.path) if c.status != 'D' else '#' }}">{{ c.path }}</a>
+                        <button class="btn btn-sm btn-light btn-icon" data-discard="{{ c.path }}" title="Discard"><i class="ti ti-arrow-back-up"></i></button>
+                    </li>
+                    {% else %}<li class="list-group-item"><div class="empty-state"><i class="ti ti-circle-check"></i>Working copy is clean</div></li>{% endfor %}
+                </ul>
+            </div>
+            {% if changes %}
+            <div class="card-footer">
+                <label class="form-label">Commit message</label>
+                <textarea class="form-control mb-2" id="msg" rows="3" placeholder="Describe your change…"></textarea>
+                <div class="form-check mb-2"><input class="form-check-input" type="checkbox" id="push" checked><label class="form-check-label" for="push">Push to <code>{{ branch }}</code></label></div>
+                <div class="form-check mb-3"><input class="form-check-input" type="checkbox" id="deploy" {% if auto_deploy %}checked{% endif %}><label class="form-check-label" for="deploy">Deploy to the master after push</label></div>
+                <button class="btn btn-primary w-100" id="commit" data-busy="Committing"><i class="ti ti-git-commit me-1"></i>Commit selected</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    <div class="col-xl-8">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-file-diff me-1 text-muted"></i>Diff against HEAD</h4></div>
+            <div class="card-body" id="diff">{% if not diff %}<div class="text-muted">Nothing to show.</div>{% endif %}</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const diff = {{ diff|tojson }};
+    if (diff) document.getElementById('diff').appendChild(SW.renderDiff(diff));
+    document.getElementById('commit')?.addEventListener('click', async e => {
+        const paths = [...document.querySelectorAll('.change-check:checked')].map(c => c.value);
+        const message = document.getElementById('msg').value.trim();
+        if (!message) return SW.toast('A commit message is required', 'warning');
+        if (!paths.length) return SW.toast('Select at least one file', 'warning');
+        SW.busy(e.currentTarget, true);
+        try {
+            const r = await SW.api(GIT_API + '/commit', { body: { message, paths, push: document.getElementById('push').checked, deploy: document.getElementById('deploy').checked } });
+            if (r.push_error) SW.toast(`Committed ${r.sha.slice(0, 8)} locally but push failed: ${r.push_error}`, 'danger', 10000);
+            else SW.toast(`Committed ${r.sha.slice(0, 8)}${r.pushed ? ', pushed' : ''}${r.deploy ? ' and deployed' : ''}`);
+            setTimeout(() => location = '{{ url_for(kind ~ ".history") }}', 700);
+        } finally { SW.busy(e.currentTarget, false); }
+    });
+    async function discard(path) {
+        if (!(await SW.confirm('Discard changes?', path || 'All uncommitted changes will be lost.', 'Discard'))) return;
+        await SW.api(GIT_API + '/discard', { body: { path } });
+        location.reload();
+    }
+    document.querySelectorAll('[data-discard]').forEach(b => b.addEventListener('click', () => discard(b.dataset.discard)));
+    document.getElementById('discard-all')?.addEventListener('click', () => discard(null));
+})();
+</script>
+{% endblock %}

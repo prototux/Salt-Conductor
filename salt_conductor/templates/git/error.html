@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card"><div class="card-body text-center py-5">
+    <div class="avatar-lg mx-auto mb-3"><span class="avatar-title rounded-circle bg-danger-subtle text-danger fs-36"><i class="ti ti-git-branch-deleted"></i></span></div>
+    <h4>The {{ kind }} repository is not available</h4>
+    <pre class="output text-start mx-auto" style="max-width:700px">{{ error }}</pre>
+    <p class="text-muted mt-3">Check <code>CONDUCTOR_{{ kind|upper }}_REPO</code> and <code>CONDUCTOR_REPO_DIR</code>, and that Salt Conductor can reach the git remote.</p>
+</div></div>
+{% endblock %}

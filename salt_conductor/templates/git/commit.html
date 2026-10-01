@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for(kind ~ '.history') }}">{{ title }} history</a></li><li class="breadcrumb-item active">{{ c.sha[:8] }}</li>{% endblock %}
+{% block content %}
+{% include "git/_toolbar.html" %}
+<div class="card">
+    <div class="card-body d-flex gap-3 align-items-start">
+        <span class="avatar-initials avatar-md rounded-circle">{{ c.author[:2]|upper }}</span>
+        <div class="flex-grow-1">
+            <h4 class="mb-1">{{ c.message.split('\n')[0] }}</h4>
+            {% if '\n' in c.message %}<pre class="output border-0 bg-transparent p-0 mb-2">{{ c.message.split('\n', 1)[1].strip() }}</pre>{% endif %}
+            <div class="text-muted fs-xs"><b>{{ c.author }}</b> &lt;{{ c.email }}&gt; committed {{ c.time|timeago }} ({{ c.time|dt }}) &middot; <span class="font-monospace">{{ c.sha }}</span></div>
+        </div>
+        <button class="btn btn-sm btn-soft-warning" data-revert="{{ c.sha }}"><i class="ti ti-arrow-back-up me-1"></i>Revert</button>
+    </div>
+</div>
+<div class="card"><div class="card-body" id="diff"></div></div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById('diff').appendChild(SW.renderDiff({{ c.diff|tojson }}));
+document.querySelector('[data-revert]').addEventListener('click', async e => {
+    if (!(await SW.confirm('Revert this commit?', 'A new commit undoing it will be created and pushed.', 'Revert', 'btn-warning'))) return;
+    const r = await SW.api(GIT_API + '/revert', { body: { sha: e.currentTarget.dataset.revert } });
+    SW.toast('Reverted in ' + r.sha.slice(0, 8));
+    setTimeout(() => location = '{{ url_for(kind ~ ".history") }}', 600);
+});
+</script>
+{% endblock %}

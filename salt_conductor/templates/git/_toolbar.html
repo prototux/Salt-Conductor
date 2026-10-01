@@ -1,0 +1,57 @@
+{# shared repository toolbar: branch switcher, sync status, actions #}
+<div class="card mb-3">
+    <div class="card-body py-2 d-flex align-items-center gap-2 flex-wrap">
+        <span class="avatar-sm"><span class="avatar-title rounded bg-primary-subtle text-primary fs-xl"><i class="ti ti-{{ 'brand-git' if kind == 'states' else 'database' }}"></i></span></span>
+        <div class="me-2">
+            <div class="fw-semibold">{{ title }} repository</div>
+            <div class="text-muted fs-xxs font-monospace text-truncate" style="max-width:320px">{{ remote }}</div>
+        </div>
+        <div class="dropdown">
+            <button class="btn btn-sm btn-light dropdown-toggle" data-bs-toggle="dropdown"><i class="ti ti-git-branch me-1"></i>{{ branch }}</button>
+            <div class="dropdown-menu">
+                <h6 class="dropdown-header">Switch branch (= saltenv{{ ' / pillarenv' if kind == 'pillar' else '' }})</h6>
+                {% for b in branches %}<a class="dropdown-item {% if b == branch %}active{% endif %}" href="#" data-checkout="{{ b }}">{{ b }}</a>{% endfor %}
+                <div class="dropdown-divider"></div>
+                <a class="dropdown-item" href="#" id="new-branch"><i class="ti ti-plus me-1"></i>New branch…</a>
+            </div>
+        </div>
+        {% if changes %}<a href="{{ url_for(kind ~ '.changes') }}" class="badge badge-soft-warning fs-xs"><i class="ti ti-pencil"></i> {{ changes|length }} uncommitted</a>{% else %}<span class="badge badge-soft-primary fs-xs"><i class="ti ti-check"></i> clean</span>{% endif %}
+        {% if ahead %}<span class="badge badge-soft-secondary fs-xs"><i class="ti ti-arrow-up"></i> {{ ahead }} to push</span>{% endif %}
+        {% if behind %}<span class="badge badge-soft-danger fs-xs"><i class="ti ti-arrow-down"></i> {{ behind }} behind</span>{% endif %}
+        <div class="ms-auto d-flex gap-1 flex-wrap">
+            <a class="btn btn-sm btn-light" href="{{ url_for(kind ~ '.browse') }}"><i class="ti ti-folder me-1"></i>Files</a>
+            <a class="btn btn-sm btn-light" href="{{ url_for(kind ~ '.changes') }}"><i class="ti ti-git-commit me-1"></i>Changes</a>
+            <a class="btn btn-sm btn-light" href="{{ url_for(kind ~ '.history') }}"><i class="ti ti-history me-1"></i>History</a>
+            {% if kind == 'states' %}<a class="btn btn-sm btn-light" href="{{ url_for('states.topfile') }}"><i class="ti ti-sitemap me-1"></i>Top file</a>{% endif %}
+            <button class="btn btn-sm btn-light" data-git="pull" title="Pull from remote"><i class="ti ti-download me-1"></i>Pull</button>
+            {% if ahead %}<button class="btn btn-sm btn-soft-secondary" data-git="push"><i class="ti ti-upload me-1"></i>Push</button>{% endif %}
+            <button class="btn btn-sm btn-soft-primary" data-git="deploy" title="{{ 'fileserver.update + saltutil.sync_all' if kind == 'states' else 'git_pillar.update + saltutil.refresh_pillar' }}"><i class="ti ti-rocket me-1"></i>Deploy to master</button>
+        </div>
+    </div>
+</div>
+<script>
+window.GIT_API = '/git/{{ kind }}/api';
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('[data-checkout]').forEach(a => a.addEventListener('click', async e => {
+        e.preventDefault();
+        await SW.api(GIT_API + '/checkout', { body: { branch: a.dataset.checkout } });
+        location.reload();
+    }));
+    document.getElementById('new-branch')?.addEventListener('click', async e => {
+        e.preventDefault();
+        const name = prompt('New branch name (it becomes a Salt environment):');
+        if (!name) return;
+        await SW.api(GIT_API + '/branch', { body: { name } });
+        SW.toast('Branch ' + name + ' created and pushed');
+        location.reload();
+    });
+    document.querySelectorAll('[data-git]').forEach(b => b.addEventListener('click', async () => {
+        SW.busy(b, true);
+        try {
+            const res = await SW.api(GIT_API + '/' + b.dataset.git, { body: {} });
+            SW.toast(b.dataset.git === 'deploy' ? 'Master updated, minions syncing' : b.dataset.git + ' done: ' + (res.output || 'ok'));
+            if (b.dataset.git !== 'deploy') setTimeout(() => location.reload(), 600);
+        } finally { SW.busy(b, false); }
+    }));
+});
+</script>

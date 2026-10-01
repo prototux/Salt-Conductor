@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for(kind ~ '.browse') }}">{{ title }}</a></li><li class="breadcrumb-item active">History</li>{% endblock %}
+{% block content %}
+{% include "git/_toolbar.html" %}
+<div class="card">
+    <div class="card-header"><h4 class="card-title">Commits on <code>{{ branch }}</code>{% if path %} touching <code>{{ path }}</code> <a href="{{ url_for(kind ~ '.history') }}" class="fs-xs">(clear)</a>{% endif %}</h4></div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead><tr><th>Commit</th><th>Message</th><th>Author</th><th>Date</th><th>Stats</th><th></th></tr></thead>
+            <tbody>
+            {% for c in commits %}
+            <tr>
+                <td><a class="font-monospace fw-semibold" href="{{ url_for(kind ~ '.commit', sha=c.sha) }}">{{ c.short }}</a></td>
+                <td class="text-truncate" style="max-width:420px">{{ c.subject }}</td>
+                <td><span class="avatar-initials rounded-circle me-1" style="width:24px;height:24px;font-size:9px">{{ c.author[:2]|upper }}</span>{{ c.author }}</td>
+                <td>{{ c.time|dt }}<div class="text-muted fs-xxs">{{ c.time|timeago }}</div></td>
+                <td class="fs-xs text-muted">{{ c.stat }}</td>
+                <td class="table-actions">
+                    <a class="btn btn-sm btn-light" href="{{ url_for(kind ~ '.commit', sha=c.sha) }}"><i class="ti ti-eye"></i></a>
+                    <button class="btn btn-sm btn-soft-warning" data-revert="{{ c.sha }}" title="Revert"><i class="ti ti-arrow-back-up"></i></button>
+                </td>
+            </tr>
+            {% else %}<tr><td colspan="6"><div class="empty-state"><i class="ti ti-git-commit"></i>No commits</div></td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <div class="card-body d-flex justify-content-between">
+        {% if page > 1 %}<a class="btn btn-sm btn-light" href="{{ url_for(kind ~ '.history', page=page - 1, path=path) }}"><i class="ti ti-chevron-left"></i> Newer</a>{% else %}<span></span>{% endif %}
+        {% if commits|length == 30 %}<a class="btn btn-sm btn-light" href="{{ url_for(kind ~ '.history', page=page + 1, path=path) }}">Older <i class="ti ti-chevron-right"></i></a>{% endif %}
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('[data-revert]').forEach(b => b.addEventListener('click', async () => {
+    if (!(await SW.confirm('Revert commit ' + b.dataset.revert.slice(0, 8) + '?', 'A new commit undoing it will be created and pushed.', 'Revert', 'btn-warning'))) return;
+    const r = await SW.api(GIT_API + '/revert', { body: { sha: b.dataset.revert } });
+    SW.toast(r.push_error ? 'Reverted locally, push failed: ' + r.push_error : 'Reverted in ' + r.sha.slice(0, 8), r.push_error ? 'danger' : 'primary');
+    setTimeout(() => location.reload(), 600);
+}));
+</script>
+{% endblock %}

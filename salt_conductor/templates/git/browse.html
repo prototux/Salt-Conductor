@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item">{{ title }}</li><li class="breadcrumb-item active">Files</li>{% endblock %}
+{% block content %}
+{% include "git/_toolbar.html" %}
+<div class="row">
+    <div class="col-xl-9">
+        <div class="card">
+            <div class="card-header flex-wrap">
+                <h4 class="card-title">
+                    <a href="{{ url_for(kind ~ '.browse') }}"><i class="ti ti-home"></i></a>
+                    {% set parts = path.split('/') if path else [] %}
+                    {% for p in parts %} <span class="text-muted">/</span> <a href="{{ url_for(kind ~ '.browse', path=parts[:loop.index]|join('/')) }}">{{ p }}</a>{% endfor %}
+                </h4>
+                <div class="card-actions gap-1">
+                    <button class="btn btn-sm btn-soft-primary" id="new-file"><i class="ti ti-file-plus me-1"></i>New file</button>
+                    <button class="btn btn-sm btn-light" id="new-dir"><i class="ti ti-folder-plus me-1"></i>New folder</button>
+                </div>
+            </div>
+            {% if last_commit %}
+            <div class="px-3 py-2 bg-light bg-opacity-50 fs-xs d-flex gap-2 align-items-center">
+                <span class="avatar-initials rounded-circle" style="width:22px;height:22px;font-size:9px">{{ last_commit.author[:2]|upper }}</span>
+                <span class="fw-semibold">{{ last_commit.author }}</span>
+                <a href="{{ url_for(kind ~ '.commit', sha=last_commit.sha) }}" class="text-truncate">{{ last_commit.subject }}</a>
+                <span class="ms-auto text-muted"><span class="font-monospace">{{ last_commit.short }}</span> &middot; {{ last_commit.time|timeago }}</span>
+            </div>
+            {% endif %}
+            <div class="file-list">
+                {% if path %}<div class="fl-row"><i class="ti ti-arrow-back-up text-muted"></i><a class="fl-name" href="{{ url_for(kind ~ '.browse', path=path.rsplit('/', 1)[0] if '/' in path else '') }}">..</a></div>{% endif %}
+                {% for e in entries %}
+                <div class="fl-row">
+                    {% if e.type == 'dir' %}<i class="ti ti-folder-filled"></i>
+                    {% elif e.name.endswith('.sls') %}<i class="ti ti-file-code text-primary"></i>
+                    {% elif e.name.endswith('.py') %}<i class="ti ti-brand-python text-secondary"></i>
+                    {% elif e.name.endswith(('.jinja', '.j2')) %}<i class="ti ti-template text-info"></i>
+                    {% else %}<i class="ti ti-file text-muted"></i>{% endif %}
+                    <a class="fl-name text-truncate {{ 'fw-semibold' if e.type == 'dir' }}" href="{{ url_for(kind ~ ('.browse' if e.type == 'dir' else '.edit'), path=e.path) }}">{{ e.name }}</a>
+                    {% if e.status %}<span class="badge badge-soft-{{ {'A': 'primary', 'M': 'warning', 'D': 'danger'}.get(e.status, 'secondary') }}">{{ {'A': 'new', 'M': 'modified', 'D': 'deleted', 'R': 'renamed'}.get(e.status, e.status) }}</span>{% endif %}
+                    <span class="text-muted fs-xs" style="width:80px;text-align:right">{{ e.size|filesize if e.type == 'file' else '' }}</span>
+                    <div class="dropdown">
+                        <button class="btn btn-sm btn-light btn-icon" data-bs-toggle="dropdown"><i class="ti ti-dots-vertical"></i></button>
+                        <div class="dropdown-menu dropdown-menu-end">
+                            {% if e.type == 'file' %}<a class="dropdown-item" href="{{ url_for(kind ~ '.history', path=e.path) }}"><i class="ti ti-history me-1"></i>History</a>{% endif %}
+                            <a class="dropdown-item" href="#" data-rename="{{ e.path }}"><i class="ti ti-pencil me-1"></i>Rename / move</a>
+                            <a class="dropdown-item text-danger" href="#" data-delete="{{ e.path }}"><i class="ti ti-trash me-1"></i>Delete</a>
+                        </div>
+                    </div>
+                </div>
+                {% else %}<div class="empty-state"><i class="ti ti-folder-open"></i>Empty folder</div>{% endfor %}
+            </div>
+        </div>
+        {% if readme %}<div class="card"><div class="card-header"><h4 class="card-title"><i class="ti ti-book me-1"></i>README</h4></div><div class="card-body"><pre class="output border-0 bg-transparent p-0">{{ readme }}</pre></div></div>{% endif %}
+    </div>
+    <div class="col-xl-3">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title"><i class="ti ti-search me-1 text-muted"></i>Search in repository</h4></div>
+            <div class="card-body">
+                <input class="form-control mb-2" id="grep" placeholder="text to find…">
+                <div id="grep-results" class="fs-xs" style="max-height:420px;overflow:auto"></div>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body fs-xs text-muted">
+                {% if kind == 'states' %}
+                <p class="mb-2"><i class="ti ti-info-circle text-primary"></i> This repository is served by <b>gitfs</b>. Each branch is a <b>saltenv</b> (<code>main</code> = <code>base</code>).</p>
+                <p class="mb-0">Custom modules in <code>_modules/</code>, <code>_states/</code>, <code>_grains/</code>… are distributed with <code>saltutil.sync_all</code> (done automatically on deploy).</p>
+                {% else %}
+                <p class="mb-2"><i class="ti ti-info-circle text-primary"></i> This repository is served by <b>git_pillar</b>. <code>top.sls</code> maps pillar SLS files to minions.</p>
+                <p class="mb-0">Keep secrets out of git: use <a href="{{ url_for('vault.index') }}">OpenBao</a> (exposed under <code>secrets:</code>) or the <a href="{{ url_for('pillar_db.index') }}">database pillar</a>.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+    const cur = {{ path|tojson }};
+    const join = n => (cur ? cur + '/' : '') + n;
+    document.getElementById('new-file').addEventListener('click', () => {
+        const n = prompt('File name (relative to this folder):', 'new.sls');
+        if (n) location = '{{ url_for(kind ~ ".edit") }}?new=1&path=' + encodeURIComponent(join(n));
+    });
+    document.getElementById('new-dir').addEventListener('click', async () => {
+        const n = prompt('Folder name:');
+        if (!n) return;
+        await SW.api(GIT_API + '/mkdir', { body: { path: join(n) } });
+        location.reload();
+    });
+    document.querySelectorAll('[data-delete]').forEach(a => a.addEventListener('click', async e => {
+        e.preventDefault();
+        if (!(await SW.confirm('Delete ' + a.dataset.delete + '?', 'The deletion is staged in the working copy; commit it from the Changes page.', 'Delete'))) return;
+        await SW.api(GIT_API + '/delete', { body: { path: a.dataset.delete } });
+        location.reload();
+    }));
+    document.querySelectorAll('[data-rename]').forEach(a => a.addEventListener('click', async e => {
+        e.preventDefault();
+        const n = prompt('New path:', a.dataset.rename);
+        if (!n || n === a.dataset.rename) return;
+        await SW.api(GIT_API + '/rename', { body: { old: a.dataset.rename, new: n } });
+        location.reload();
+    }));
+    document.getElementById('grep').addEventListener('input', SW.debounce(async e => {
+        const q = e.target.value.trim(), box = document.getElementById('grep-results');
+        if (q.length < 2) { box.innerHTML = ''; return; }
+        const res = await SW.api(GIT_API + '/grep?q=' + encodeURIComponent(q));
+        box.innerHTML = res.map(r => `<a class="d-block py-1 border-bottom border-dashed" href="{{ url_for(kind ~ '.edit') }}?path=${encodeURIComponent(r.path)}#L${r.line}">
+            <span class="fw-semibold">${SW.esc(r.path)}:${r.line}</span><div class="font-monospace text-muted text-truncate">${SW.esc(r.text)}</div></a>`).join('') || '<span class="text-muted">No match</span>';
+    }, 300));
+})();
+</script>
+{% endblock %}

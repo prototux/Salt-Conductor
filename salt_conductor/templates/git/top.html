@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block breadcrumb %}<li class="breadcrumb-item"><a href="{{ url_for('states.browse') }}">States</a></li><li class="breadcrumb-item active">Top file</li>{% endblock %}
+{% block content %}
+{% include "git/_toolbar.html" %}
+<div class="row">
+    <div class="col-xl-8">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title">State assignments from <code>top.sls</code></h4>
+                <div class="card-actions"><a class="btn btn-sm btn-soft-primary" href="{{ url_for('states.edit', path='top.sls') }}"><i class="ti ti-pencil me-1"></i>Edit top.sls</a></div></div>
+            {% if error %}<div class="card-body"><div class="alert alert-warning mb-0">{{ error }}</div></div>{% endif %}
+            {% if parsed %}
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead><tr><th>Saltenv</th><th>Target</th><th>Match</th><th>States</th><th>Matching minions</th></tr></thead>
+                    <tbody>
+                    {% for row in parsed %}
+                    <tr>
+                        <td><span class="badge badge-soft-dark">{{ row.env }}</span></td>
+                        <td class="font-monospace fw-semibold">{{ row.target }}</td>
+                        <td><span class="badge badge-soft-secondary">{{ row.match }}</span></td>
+                        <td>{% for s in row.states %}<a class="badge badge-soft-primary me-1 font-monospace" href="{{ url_for('states.browse', sls=s) }}">{{ s }}</a>{% endfor %}</td>
+                        <td class="matches" data-tgt="{{ row.target }}" data-type="{{ row.match }}"><span class="spinner-border spinner-border-sm text-primary"></span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% if raw %}<div class="card"><div class="card-header"><h4 class="card-title">Raw top.sls</h4></div><div class="card-body"><pre class="output">{{ raw }}</pre></div></div>{% endif %}
+    </div>
+    <div class="col-xl-4">
+        <div class="card">
+            <div class="card-header"><h4 class="card-title">SLS files in the repository</h4></div>
+            <div class="card-body">
+                {% for s in sls_list %}<a class="badge badge-soft-secondary me-1 mb-1 font-monospace" href="{{ url_for('run.index', fun='state.test', args=s) }}" title="Dry-run apply">{{ s }}</a>{% else %}<span class="text-muted">None</span>{% endfor %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelectorAll('.matches').forEach(async td => {
+    try {
+        const list = await SW.api('/api/preview-target', { quiet: true, body: { tgt: td.dataset.tgt, tgt_type: td.dataset.type } });
+        td.innerHTML = list.map(m => `<a class="badge badge-soft-info me-1" href="/minions/${encodeURIComponent(m)}">${SW.esc(m)}</a>`).join('') || '<span class="text-muted fs-xs">none responding</span>';
+    } catch (e) { td.innerHTML = '<span class="text-danger fs-xs">error</span>'; }
+});
+</script>
+{% endblock %}
