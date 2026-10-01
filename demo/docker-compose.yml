@@ -1,0 +1,172 @@
+# Salt Conductor demo lab - run from this directory:  docker compose up -d --build
+#
+#   salt-master (+ salt-api)  -> gitfs / git_pillar / conductor_db / vault ext_pillars
+#   web01, web02, db01        -> minions (auto-accepted)
+#   new01                     -> minion whose key stays pending
+#   postgres                  -> job cache, event history, DB pillar, Salt Conductor data
+#   openbao                   -> secrets (Vault API compatible), dev mode
+#   openldap                  -> directory for the Salt LDAP eauth (group-restricted login)
+#   conductor                 -> Salt Conductor, built from the repository root (http://localhost:8080)
+
+name: salt-conductor-demo
+
+x-salt-image: &salt-image
+  image: salt-conductor-demo/salt:3008
+  pull_policy: never
+  restart: unless-stopped
+
+x-minion: &minion
+  <<: *salt-image
+  command: ["minion"]
+  mem_limit: 256m
+  depends_on:
+    - salt-master
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 256m
+    environment:
+      POSTGRES_DB: salt
+      POSTGRES_USER: salt
+      POSTGRES_PASSWORD: salt
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../salt_conductor/schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+      - ./postgres/90-seed.sql:/docker-entrypoint-initdb.d/90-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U salt -d salt"]
+      interval: 5s
+      retries: 20
+
+  openbao:
+    image: openbao/openbao:latest
+    restart: unless-stopped
+    mem_limit: 256m
+    cap_add: [IPC_LOCK]
+    command: ["server", "-dev", "-dev-root-token-id=root", "-dev-listen-address=0.0.0.0:8200"]
+    ports:
+      - "127.0.0.1:8200:8200"
+
+  openbao-seed:
+    image: openbao/openbao:latest
+    mem_limit: 128m
+    restart: "no"
+    depends_on: [openbao]
+    entrypoint: ["/bin/sh", "/seed.sh"]
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: root
+    volumes:
+      - ./openbao/seed.sh:/seed.sh:ro
+
+  openldap:
+    image: osixia/openldap:1.5.0
+    restart: unless-stopped
+    mem_limit: 128m
+    # slapd sizes internal tables from the fd limit: a huge docker default eats RAM
+    ulimits:
+      nofile: {soft: 1024, hard: 1024}
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: Example
+      LDAP_DOMAIN: example.org
+      LDAP_ADMIN_PASSWORD: admin
+      LDAP_READONLY_USER: "true"
+      LDAP_READONLY_USER_USERNAME: readonly
+      LDAP_READONLY_USER_PASSWORD: readonly
+      LDAP_TLS: "false"
+    ports:
+      - "127.0.0.1:3389:389"
+    volumes:
+      - ./openldap/50-demo.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/50-demo.ldif:ro
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+
+  salt-master:
+    <<: *salt-image
+    build:
+      context: ./salt
+      args:
+        SALT_VERSION: "3008"
+    hostname: salt-master
+    command: ["master"]
+    mem_limit: 1g
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openbao:
+        condition: service_started
+      openldap:
+        condition: service_started
+    ports:
+      - "127.0.0.1:8000:8000"   # salt-api (rest_cherrypy)
+    volumes:
+      - ./salt/master.d:/etc/salt/master.d:ro
+      - ../salt/extension_modules:/srv/salt-ext:ro
+      - ./states:/seed/states:ro
+      - ./pillar:/seed/pillar:ro
+      - ./data/git:/srv/git
+      - salt-pki:/etc/salt/pki
+
+  web01:
+    <<: *minion
+    hostname: web01
+    volumes: ["web01-pki:/etc/salt/pki"]
+    environment: {MINION_ID: web01, MINION_ROLES: web, MINION_DC: dc1}
+
+  web02:
+    <<: *minion
+    hostname: web02
+    volumes: ["web02-pki:/etc/salt/pki"]
+    environment: {MINION_ID: web02, MINION_ROLES: web, MINION_DC: dc2}
+
+  db01:
+    <<: *minion
+    hostname: db01
+    volumes: ["db01-pki:/etc/salt/pki"]
+    environment: {MINION_ID: db01, MINION_ROLES: db, MINION_DC: dc1}
+
+  new01:
+    <<: *minion
+    hostname: new01
+    volumes: ["new01-pki:/etc/salt/pki"]
+    environment: {MINION_ID: new01, MINION_ROLES: "web", MINION_ENV: staging}
+
+  conductor:
+    build: ..
+    image: salt-conductor:dev
+    restart: unless-stopped
+    mem_limit: 384m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      salt-master:
+        condition: service_started
+    environment:
+      CONDUCTOR_SALT_API_URL: http://salt-master:8000
+      CONDUCTOR_EAUTH_BACKENDS: pam,ldap
+      CONDUCTOR_DATABASE_URL: postgresql://salt:salt@postgres:5432/salt
+      CONDUCTOR_OPENBAO_URL: http://openbao:8200
+      CONDUCTOR_OPENBAO_TOKEN: root
+      CONDUCTOR_STATES_REPO: file:///srv/git/states.git
+      CONDUCTOR_PILLAR_REPO: file:///srv/git/pillar.git
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data/git:/srv/git
+      - conductor-data:/data
+
+volumes:
+  pgdata:
+  ldap-data:
+  ldap-config:
+  salt-pki:
+  conductor-data:
+  web01-pki:
+  web02-pki:
+  db01-pki:
+  new01-pki:
